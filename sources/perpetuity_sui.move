@@ -1,54 +1,114 @@
 module perpetuity_sui::orderbook {
     use sui::balance::{Self, Balance};
+    use sui::coin::{Self, Coin};
     use sui::sui::SUI;
+    use sui::table::{Self, Table};
+    use sui::event;
     use std::string::String;
 
     // ========== ERRORS ==========
     const EInvalidPrice: u64 = 1;
     const EInvalidQuantity: u64 = 2;
     const EOrderNotFound: u64 = 3;
-    const EMarketNotFound: u64 = 5;
+    const EMarketNotFound: u64 = 4;
+    const EInsufficientFunds: u64 = 5;
+    const EUnauthorized: u64 = 6;
+
+    // ========== ENUMS ==========
+    public enum Option has copy, drop, store {
+        OptionA,
+        OptionB,
+    }
+
+    // ========== EVENTS ==========
+    public struct OrderPlaced has copy, drop {
+        order_id: u64,
+        trader: address,
+        market_id: u64,
+        option: Option,
+        price: u64,
+        quantity: u64,
+        is_bid: bool,
+    }
+
+    public struct OrderCancelled has copy, drop {
+        order_id: u64,
+        trader: address,
+        market_id: u64,
+    }
+
+    public struct TradeSettled has copy, drop {
+        buyer_order_id: u64,
+        seller_order_id: u64,
+        price: u64,
+        quantity: u64,
+        market_id: u64,
+    }
 
     // ========== STRUCTS ==========
 
-    /// Market (like your Market struct in Rust)
+    public struct AdminCap has key {
+        id: UID,
+    }
+
     public struct Market has key {
         id: UID,
         market_id: u64,
         admin: address,
         question: String,
-        token_a_supply: Balance<SUI>,    // YES opinion tokens
-        token_b_supply: Balance<SUI>,    // NO opinion tokens
-        usdc_balance: Balance<SUI>,      // USDC collateral
+        option_a_name: String,
+        option_b_name: String,
+        vault: Balance<SUI>,
         is_active: bool,
+        created_at: u64,
     }
 
-    /// Order in the orderbook
     public struct Order has store, drop {
         order_id: u64,
         trader: address,
         market_id: u64,
-        is_token_a: bool,  // true = YES, false = NO
-        price: u64,        // in USDC
+        option: Option,
+        price: u64,
         quantity: u64,
-        is_bid: bool,      // true = buy order, false = sell order
+        filled_quantity: u64,
+        is_bid: bool,
+        created_at: u64,
     }
 
-    /// The orderbook for a market
     public struct OrderBook has key {
         id: UID,
         market_id: u64,
-        bids: vector<Order>,   // Buy orders (sorted desc by price)
-        asks: vector<Order>,   // Sell orders (sorted asc by price)
+        orders: Table<u64, Order>,
+        active_orders: Table<u64, bool>,
+        bid_ids: vector<u64>,
+        ask_ids: vector<u64>,
         next_order_id: u64,
+    }
+
+    public struct UserBalance has key {
+        id: UID,
+        market_id: u64,
+        trader: address,
+        balance: Balance<SUI>,
+    }
+
+    // ========== INITIALIZATION ==========
+
+    public fun init_admin(ctx: &mut TxContext) {
+        let admin_cap = AdminCap {
+            id: object::new(ctx),
+        };
+        transfer::transfer(admin_cap, tx_context::sender(ctx));
     }
 
     // ========== CREATE MARKET ==========
 
-    /// Create a new opinion market (like your create_market in Rust)
     public fun create_market(
+        _admin_cap: &AdminCap,
         market_id: u64,
         question: String,
+        option_a_name: String,
+        option_b_name: String,
         ctx: &mut TxContext,
     ) {
         let market = Market {
@@ -56,17 +116,20 @@ module perpetuity_sui::orderbook {
             market_id,
             admin: tx_context::sender(ctx),
             question,
-            token_a_supply: balance::zero(),
-            token_b_supply: balance::zero(),
-            usdc_balance: balance::zero(),
+            option_a_name,
+            option_b_name,
+            vault: balance::zero(),
             is_active: true,
+            created_at: 0,
         };
 
         let orderbook = OrderBook {
             id: object::new(ctx),
             market_id,
-            bids: vector::empty(),
-            asks: vector::empty(),
+            orders: table::new(ctx),
+            active_orders: table::new(ctx),
+            bid_ids: vector::empty(),
+            ask_ids: vector::empty(),
             next_order_id: 1,
         };
 
@@ -74,14 +137,45 @@ module perpetuity_sui::orderbook {
         transfer::share_object(orderbook);
     }
 
+    // ========== DEPOSIT FUNDS ==========
+
+    public fun deposit_funds(
+        market_id: u64,
+        coins: Coin<SUI>,
+        ctx: &mut TxContext,
+    ) {
+        let amount = coin::value(&coins);
+        assert!(amount > 0, EInsufficientFunds);
+
+        let user_balance = UserBalance {
+            id: object::new(ctx),
+            market_id,
+            trader: tx_context::sender(ctx),
+            balance: coin::into_balance(coins),
+        };
+
+        transfer::transfer(user_balance, tx_context::sender(ctx));
+    }
+
+    // ========== WITHDRAW FUNDS ==========
+
+    public fun withdraw_funds(
+        user_balance: &mut UserBalance,
+        amount: u64,
+        ctx: &mut TxContext,
+    ): Coin<SUI> {
+        assert!(balance::value(&user_balance.balance) >= amount, EInsufficientFunds);
+        let withdrawn = balance::split(&mut user_balance.balance, amount);
+        coin::from_balance(withdrawn, ctx)
+    }
+
     // ========== PLACE ORDER ==========
 
-    /// Place a buy or sell order
-    /// is_token_a = true means trading YES, false means trading NO
-    /// is_bid = true means you want to BUY, false means you want to SELL
     public fun place_order(
         orderbook: &mut OrderBook,
-        is_token_a: bool,
+        market: &mut Market,
+        user_balance: &mut UserBalance,
+        option: Option,
         price: u64,
         quantity: u64,
         is_bid: bool,
@@ -89,123 +183,231 @@ module perpetuity_sui::orderbook {
     ) {
         assert!(price > 0, EInvalidPrice);
         assert!(quantity > 0, EInvalidQuantity);
+        assert!(user_balance.market_id == orderbook.market_id, EMarketNotFound);
+        assert!(market.is_active, EMarketNotFound);
+
+        let required_collateral = price * quantity;
+        assert!(balance::value(&user_balance.balance) >= required_collateral, EInsufficientFunds);
+
+        let collateral = balance::split(&mut user_balance.balance, required_collateral);
+        balance::join(&mut market.vault, collateral);
 
         let order = Order {
             order_id: orderbook.next_order_id,
             trader: tx_context::sender(ctx),
             market_id: orderbook.market_id,
-            is_token_a,
+            option,
+            price,
+            quantity,
+            filled_quantity: 0,
+            is_bid,
+            created_at: 0,
+        };
+
+        let order_id = orderbook.next_order_id;
+        table::add(&mut orderbook.orders, order_id, order);
+        table::add(&mut orderbook.active_orders, order_id, true);
+
+        if (is_bid) {
+            vector::push_back(&mut orderbook.bid_ids, order_id);
+        } else {
+            vector::push_back(&mut orderbook.ask_ids, order_id);
+        };
+
+        event::emit(OrderPlaced {
+            order_id,
+            trader: tx_context::sender(ctx),
+            market_id: orderbook.market_id,
+            option,
             price,
             quantity,
             is_bid,
-        };
-
-        // Add to bids or asks
-        if (is_bid) {
-            vector::push_back(&mut orderbook.bids, order);
-        } else {
-            vector::push_back(&mut orderbook.asks, order);
-        };
+        });
 
         orderbook.next_order_id = orderbook.next_order_id + 1;
     }
 
-    /// Cancel an order
+    // ========== PLACE ORDER CLI WRAPPER ==========
+
+    public fun place_order_cli(
+        orderbook: &mut OrderBook,
+        market: &mut Market,
+        user_balance: &mut UserBalance,
+        option_u8: u8,
+        price: u64,
+        quantity: u64,
+        is_bid: bool,
+        ctx: &mut TxContext,
+    ) {
+        let option = if (option_u8 == 0) { Option::OptionA } else { Option::OptionB };
+        
+        place_order(
+            orderbook,
+            market,
+            user_balance,
+            option,
+            price,
+            quantity,
+            is_bid,
+            ctx
+        );
+    }
+
+    // ========== CANCEL ORDER ==========
+
     public fun cancel_order(
         orderbook: &mut OrderBook,
+        market: &mut Market,
+        user_balance: &mut UserBalance,
         order_id: u64,
         ctx: &mut TxContext,
     ) {
         let sender = tx_context::sender(ctx);
-        let mut found_index = 0;
-        let mut found_in_bids = false;
-        let mut found = false;
+        assert!(table::contains(&orderbook.orders, order_id), EOrderNotFound);
 
-        // Search in bids
-        let mut i = 0;
-        let len_bids = vector::length(&orderbook.bids);
-        while (i < len_bids) {
-            let order = vector::borrow(&orderbook.bids, i);
-            if (order.order_id == order_id && order.trader == sender) {
-                found_index = i;
-                found_in_bids = true;
-                found = true;
-                break
+        let order = table::borrow(&orderbook.orders, order_id);
+        assert!(order.trader == sender, EUnauthorized);
+
+        let is_bid = order.is_bid;
+        let unfilled = order.quantity - order.filled_quantity;
+        let refund_amount = order.price * unfilled;
+
+        table::remove(&mut orderbook.orders, order_id);
+        table::remove(&mut orderbook.active_orders, order_id);
+
+        if (is_bid) {
+            let bid_len = vector::length(&orderbook.bid_ids);
+            let mut bid_i = 0;
+            while (bid_i < bid_len) {
+                if (*vector::borrow(&orderbook.bid_ids, bid_i) == order_id) {
+                    vector::remove(&mut orderbook.bid_ids, bid_i);
+                    break
+                };
+                bid_i = bid_i + 1;
             };
-            i = i + 1;
+        } else {
+            let ask_len = vector::length(&orderbook.ask_ids);
+            let mut ask_i = 0;
+            while (ask_i < ask_len) {
+                if (*vector::borrow(&orderbook.ask_ids, ask_i) == order_id) {
+                    vector::remove(&mut orderbook.ask_ids, ask_i);
+                    break
+                };
+                ask_i = ask_i + 1;
+            };
         };
 
-        if (found) {
-            if (found_in_bids) {
-                vector::remove(&mut orderbook.bids, found_index);
-            };
-            return
+        if (refund_amount > 0) {
+            let refund = balance::split(&mut market.vault, refund_amount);
+            balance::join(&mut user_balance.balance, refund);
         };
 
-        // Search in asks
-        let mut j = 0;
-        let len_asks = vector::length(&orderbook.asks);
-        while (j < len_asks) {
-            let order = vector::borrow(&orderbook.asks, j);
-            if (order.order_id == order_id && order.trader == sender) {
-                found_index = j;
-                found = true;
-                break
-            };
-            j = j + 1;
-        };
-
-        assert!(found, EOrderNotFound);
-        vector::remove(&mut orderbook.asks, found_index);
+        event::emit(OrderCancelled {
+            order_id,
+            trader: sender,
+            market_id: orderbook.market_id,
+        });
     }
 
     // ========== SETTLE TRADE ==========
 
-    /// Settle a matched trade (called by your off-chain matcher)
     public fun settle_trade(
         orderbook: &mut OrderBook,
-        _buyer_order_id: u64,
-        _seller_order_id: u64,
-        _matched_price: u64,
-        _matched_quantity: u64,
+        market: &mut Market,
+        buyer_order_id: u64,
+        seller_order_id: u64,
+        matched_price: u64,
+        matched_quantity: u64,
+        buyer_balance: &mut UserBalance,
+        seller_balance: &mut UserBalance,
         _ctx: &mut TxContext,
     ) {
-        // Find buyer and seller orders
-        assert!(orderbook.market_id > 0, EMarketNotFound);
+        assert!(table::contains(&orderbook.orders, buyer_order_id), EOrderNotFound);
+        assert!(table::contains(&orderbook.orders, seller_order_id), EOrderNotFound);
 
-        // In your off-chain matcher:
-        // 1. Match highest bid with lowest ask if they cross
-        // 2. Call this function with matched details
-        // 3. Update positions (done here)
+        {
+            let buyer_order = table::borrow(&orderbook.orders, buyer_order_id);
+            assert!(buyer_order.is_bid, EUnauthorized);
+        };
 
-        // TODO: Update buyer and seller positions
-        // Transfer tokens between them
+        {
+            let seller_order = table::borrow(&orderbook.orders, seller_order_id);
+            assert!(!seller_order.is_bid, EUnauthorized);
+        };
+
+        {
+            let buyer_order = table::borrow_mut(&mut orderbook.orders, buyer_order_id);
+            buyer_order.filled_quantity = buyer_order.filled_quantity + matched_quantity;
+        };
+
+        {
+            let seller_order = table::borrow_mut(&mut orderbook.orders, seller_order_id);
+            seller_order.filled_quantity = seller_order.filled_quantity + matched_quantity;
+        };
+
+        let buyer_refund_amt = {
+            let buyer_order = table::borrow(&orderbook.orders, buyer_order_id);
+            let buyer_unfilled = buyer_order.quantity - buyer_order.filled_quantity;
+            buyer_order.price * buyer_unfilled
+        };
+
+        let seller_refund_amt = {
+            let seller_order = table::borrow(&orderbook.orders, seller_order_id);
+            let seller_unfilled = seller_order.quantity - seller_order.filled_quantity;
+            seller_order.price * seller_unfilled
+        };
+
+        if (buyer_refund_amt > 0) {
+            let refund = balance::split(&mut market.vault, buyer_refund_amt);
+            balance::join(&mut buyer_balance.balance, refund);
+        };
+        if (seller_refund_amt > 0) {
+            let refund = balance::split(&mut market.vault, seller_refund_amt);
+            balance::join(&mut seller_balance.balance, refund);
+        };
+
+        event::emit(TradeSettled {
+            buyer_order_id,
+            seller_order_id,
+            price: matched_price,
+            quantity: matched_quantity,
+            market_id: orderbook.market_id,
+        });
     }
 
     // ========== VIEW FUNCTIONS ==========
 
-    /// Get top bid price
     public fun get_top_bid(orderbook: &OrderBook): u64 {
-        if (vector::length(&orderbook.bids) > 0) {
-            let order = vector::borrow(&orderbook.bids, 0);
-            order.price
-        } else {
-            0
-        }
+        if (vector::length(&orderbook.bid_ids) > 0) {
+            let order_id = *vector::borrow(&orderbook.bid_ids, 0);
+            if (table::contains(&orderbook.active_orders, order_id)) {
+                let order = table::borrow(&orderbook.orders, order_id);
+                return order.price
+            }
+        };
+        0
     }
 
-    /// Get top ask price
     public fun get_top_ask(orderbook: &OrderBook): u64 {
-        if (vector::length(&orderbook.asks) > 0) {
-            let order = vector::borrow(&orderbook.asks, 0);
-            order.price
-        } else {
-            0
-        }
+        if (vector::length(&orderbook.ask_ids) > 0) {
+            let order_id = *vector::borrow(&orderbook.ask_ids, 0);
+            if (table::contains(&orderbook.active_orders, order_id)) {
+                let order = table::borrow(&orderbook.orders, order_id);
+                return order.price
+            }
+        };
+        0
     }
 
-    /// Get orderbook depth
     public fun get_orderbook_depth(orderbook: &OrderBook): (u64, u64) {
-        (vector::length(&orderbook.bids), vector::length(&orderbook.asks))
+        (vector::length(&orderbook.bid_ids), vector::length(&orderbook.ask_ids))
+    }
+
+    public fun get_user_balance(user_balance: &UserBalance): u64 {
+        balance::value(&user_balance.balance)
+    }
+
+    public fun get_market_vault_balance(market: &Market): u64 {
+        balance::value(&market.vault)
     }
 }
