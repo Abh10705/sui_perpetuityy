@@ -6,6 +6,7 @@ module perpetuity_sui::orderbook {
     use sui::event;
     use std::string::String;
 
+
     // ========== ERRORS ==========
     const EInvalidPrice: u64 = 1;
     const EInvalidQuantity: u64 = 2;
@@ -14,11 +15,13 @@ module perpetuity_sui::orderbook {
     const EInsufficientFunds: u64 = 5;
     const EUnauthorized: u64 = 6;
 
+
     // ========== ENUMS ==========
     public enum Option has copy, drop, store {
         OptionA,
         OptionB,
     }
+
 
     // ========== EVENTS ==========
     public struct OrderPlaced has copy, drop {
@@ -31,11 +34,13 @@ module perpetuity_sui::orderbook {
         is_bid: bool,
     }
 
+
     public struct OrderCancelled has copy, drop {
         order_id: u64,
         trader: address,
         market_id: u64,
     }
+
 
     public struct TradeSettled has copy, drop {
         buyer_order_id: u64,
@@ -45,11 +50,23 @@ module perpetuity_sui::orderbook {
         market_id: u64,
     }
 
+    // ⭐ NEW EVENT: Auto-Match
+    public struct AutoMatched has copy, drop {
+        buyer_order_id: u64,
+        seller_order_id: u64,
+        price: u64,
+        quantity: u64,
+        market_id: u64,
+    }
+
+
     // ========== STRUCTS ==========
+
 
     public struct AdminCap has key {
         id: UID,
     }
+
 
     public struct Market has key {
         id: UID,
@@ -63,6 +80,7 @@ module perpetuity_sui::orderbook {
         created_at: u64,
     }
 
+
     public struct Order has store, drop {
         order_id: u64,
         trader: address,
@@ -75,6 +93,7 @@ module perpetuity_sui::orderbook {
         created_at: u64,
     }
 
+
     public struct OrderBook has key {
         id: UID,
         market_id: u64,
@@ -85,6 +104,7 @@ module perpetuity_sui::orderbook {
         next_order_id: u64,
     }
 
+
     public struct UserBalance has key {
         id: UID,
         market_id: u64,
@@ -92,7 +112,9 @@ module perpetuity_sui::orderbook {
         balance: Balance<SUI>,
     }
 
+
     // ========== INITIALIZATION ==========
+
 
     public fun init_admin(ctx: &mut TxContext) {
         let admin_cap = AdminCap {
@@ -101,7 +123,9 @@ module perpetuity_sui::orderbook {
         transfer::transfer(admin_cap, tx_context::sender(ctx));
     }
 
+
     // ========== CREATE MARKET ==========
+
 
     public fun create_market(
         _admin_cap: &AdminCap,
@@ -123,6 +147,7 @@ module perpetuity_sui::orderbook {
             created_at: 0,
         };
 
+
         let orderbook = OrderBook {
             id: object::new(ctx),
             market_id,
@@ -133,11 +158,14 @@ module perpetuity_sui::orderbook {
             next_order_id: 1,
         };
 
+
         transfer::share_object(market);
         transfer::share_object(orderbook);
     }
 
+
     // ========== DEPOSIT FUNDS ==========
+
 
     public fun deposit_funds(
         market_id: u64,
@@ -147,6 +175,7 @@ module perpetuity_sui::orderbook {
         let amount = coin::value(&coins);
         assert!(amount > 0, EInsufficientFunds);
 
+
         let user_balance = UserBalance {
             id: object::new(ctx),
             market_id,
@@ -154,10 +183,13 @@ module perpetuity_sui::orderbook {
             balance: coin::into_balance(coins),
         };
 
+
         transfer::transfer(user_balance, tx_context::sender(ctx));
     }
 
+
     // ========== WITHDRAW FUNDS ==========
+
 
     public fun withdraw_funds(
         user_balance: &mut UserBalance,
@@ -169,7 +201,191 @@ module perpetuity_sui::orderbook {
         coin::from_balance(withdrawn, ctx)
     }
 
+
+    // ⭐ NEW: AUTO-MATCHING LOGIC (BEST PRICE FIRST)
+    fun auto_match_orders(
+        orderbook: &mut OrderBook,
+        market: &mut Market,
+        new_order_id: u64,
+        is_bid: bool,
+    ) {
+        let new_order_price = {
+            let order = table::borrow(&orderbook.orders, new_order_id);
+            order.price
+        };
+
+        if (is_bid) {
+            // New order is BID (BUY), look for ASK (SELL) orders with best price (lowest)
+            let mut ask_index = 0;
+            let ask_len = vector::length(&orderbook.ask_ids);
+
+            while (ask_index < ask_len) {
+                let ask_order_id = *vector::borrow(&orderbook.ask_ids, ask_index);
+                
+                // Check if ask order is still active
+                if (!table::contains(&orderbook.active_orders, ask_order_id)) {
+                    ask_index = ask_index + 1;
+                    continue
+                };
+
+                let ask_price = {
+                    let order = table::borrow(&orderbook.orders, ask_order_id);
+                    order.price
+                };
+
+                // Best price logic: if seller's price <= buyer's price, match!
+                if (ask_price <= new_order_price) {
+                    // Get quantities to match
+                    let new_order_remaining = {
+                        let order = table::borrow(&orderbook.orders, new_order_id);
+                        order.quantity - order.filled_quantity
+                    };
+
+                    let ask_order_remaining = {
+                        let order = table::borrow(&orderbook.orders, ask_order_id);
+                        order.quantity - order.filled_quantity
+                    };
+
+                    if (new_order_remaining > 0 && ask_order_remaining > 0) {
+                        let match_qty = if (new_order_remaining < ask_order_remaining) {
+                            new_order_remaining
+                        } else {
+                            ask_order_remaining
+                        };
+
+                        // Execute match
+                        {
+                            let new_order = table::borrow_mut(&mut orderbook.orders, new_order_id);
+                            new_order.filled_quantity = new_order.filled_quantity + match_qty;
+                        };
+
+                        {
+                            let ask_order = table::borrow_mut(&mut orderbook.orders, ask_order_id);
+                            ask_order.filled_quantity = ask_order.filled_quantity + match_qty;
+                        };
+
+                        // Refund logic: both orders may have unfilled portions
+                        let new_order_refund = {
+                            let order = table::borrow(&orderbook.orders, new_order_id);
+                            let unfilled = order.quantity - order.filled_quantity;
+                            order.price * unfilled
+                        };
+
+                        let ask_order_refund = {
+                            let order = table::borrow(&orderbook.orders, ask_order_id);
+                            let unfilled = order.quantity - order.filled_quantity;
+                            order.price * unfilled
+                        };
+
+                        // Note: Refunds are handled in place_order after matching completes
+                        // Emit match event
+                        event::emit(AutoMatched {
+                            buyer_order_id: new_order_id,
+                            seller_order_id: ask_order_id,
+                            price: ask_price,
+                            quantity: match_qty,
+                            market_id: orderbook.market_id,
+                        });
+
+                        // If new order is fully filled, stop matching
+                        let new_remaining = {
+                            let order = table::borrow(&orderbook.orders, new_order_id);
+                            order.quantity - order.filled_quantity
+                        };
+                        
+                        if (new_remaining == 0) {
+                            break
+                        };
+                    }
+                } else {
+                    // No more matches possible (all remaining asks are more expensive)
+                    break
+                };
+
+                ask_index = ask_index + 1;
+            };
+        } else {
+            // New order is ASK (SELL), look for BID (BUY) orders with best price (highest)
+            let mut bid_index = 0;
+            let bid_len = vector::length(&orderbook.bid_ids);
+
+            while (bid_index < bid_len) {
+                let bid_order_id = *vector::borrow(&orderbook.bid_ids, bid_index);
+                
+                // Check if bid order is still active
+                if (!table::contains(&orderbook.active_orders, bid_order_id)) {
+                    bid_index = bid_index + 1;
+                    continue
+                };
+
+                let bid_price = {
+                    let order = table::borrow(&orderbook.orders, bid_order_id);
+                    order.price
+                };
+
+                // Best price logic: if buyer's price >= seller's price, match!
+                if (bid_price >= new_order_price) {
+                    // Get quantities to match
+                    let new_order_remaining = {
+                        let order = table::borrow(&orderbook.orders, new_order_id);
+                        order.quantity - order.filled_quantity
+                    };
+
+                    let bid_order_remaining = {
+                        let order = table::borrow(&orderbook.orders, bid_order_id);
+                        order.quantity - order.filled_quantity
+                    };
+
+                    if (new_order_remaining > 0 && bid_order_remaining > 0) {
+                        let match_qty = if (new_order_remaining < bid_order_remaining) {
+                            new_order_remaining
+                        } else {
+                            bid_order_remaining
+                        };
+
+                        // Execute match
+                        {
+                            let bid_order = table::borrow_mut(&mut orderbook.orders, bid_order_id);
+                            bid_order.filled_quantity = bid_order.filled_quantity + match_qty;
+                        };
+
+                        {
+                            let new_order = table::borrow_mut(&mut orderbook.orders, new_order_id);
+                            new_order.filled_quantity = new_order.filled_quantity + match_qty;
+                        };
+
+                        // Emit match event
+                        event::emit(AutoMatched {
+                            buyer_order_id: bid_order_id,
+                            seller_order_id: new_order_id,
+                            price: bid_price,
+                            quantity: match_qty,
+                            market_id: orderbook.market_id,
+                        });
+
+                        // If new order is fully filled, stop matching
+                        let new_remaining = {
+                            let order = table::borrow(&orderbook.orders, new_order_id);
+                            order.quantity - order.filled_quantity
+                        };
+                        
+                        if (new_remaining == 0) {
+                            break
+                        };
+                    }
+                } else {
+                    // No more matches possible (all remaining bids are cheaper)
+                    break
+                };
+
+                bid_index = bid_index + 1;
+            };
+        };
+    }
+
+
     // ========== PLACE ORDER ==========
+
 
     public fun place_order(
         orderbook: &mut OrderBook,
@@ -186,11 +402,14 @@ module perpetuity_sui::orderbook {
         assert!(user_balance.market_id == orderbook.market_id, EMarketNotFound);
         assert!(market.is_active, EMarketNotFound);
 
+
         let required_collateral = price * quantity;
         assert!(balance::value(&user_balance.balance) >= required_collateral, EInsufficientFunds);
 
+
         let collateral = balance::split(&mut user_balance.balance, required_collateral);
         balance::join(&mut market.vault, collateral);
+
 
         let order = Order {
             order_id: orderbook.next_order_id,
@@ -204,15 +423,18 @@ module perpetuity_sui::orderbook {
             created_at: 0,
         };
 
+
         let order_id = orderbook.next_order_id;
         table::add(&mut orderbook.orders, order_id, order);
         table::add(&mut orderbook.active_orders, order_id, true);
+
 
         if (is_bid) {
             vector::push_back(&mut orderbook.bid_ids, order_id);
         } else {
             vector::push_back(&mut orderbook.ask_ids, order_id);
         };
+
 
         event::emit(OrderPlaced {
             order_id,
@@ -224,10 +446,33 @@ module perpetuity_sui::orderbook {
             is_bid,
         });
 
+
         orderbook.next_order_id = orderbook.next_order_id + 1;
+
+        // ⭐ NEW: AUTO-MATCHING HAPPENS HERE!
+        auto_match_orders(orderbook, market, order_id, is_bid);
+
+        // ⭐ NEW: Handle refunds for unfilled portions
+        let unfilled_qty = {
+            let order = table::borrow(&orderbook.orders, order_id);
+            order.quantity - order.filled_quantity
+        };
+
+        if (unfilled_qty > 0) {
+            // Partial or no fill - refund unfilled amount
+            let refund_amount = price * unfilled_qty;
+            if (refund_amount > 0) {
+                let refund = balance::split(&mut market.vault, refund_amount);
+                balance::join(&mut user_balance.balance, refund);
+            };
+        } else {
+            // Fully filled - no refund needed
+        };
     }
 
+
     // ========== PLACE ORDER CLI WRAPPER ==========
+
 
     public fun place_order_cli(
         orderbook: &mut OrderBook,
@@ -253,7 +498,9 @@ module perpetuity_sui::orderbook {
         );
     }
 
+
     // ========== CANCEL ORDER ==========
+
 
     public fun cancel_order(
         orderbook: &mut OrderBook,
@@ -265,15 +512,19 @@ module perpetuity_sui::orderbook {
         let sender = tx_context::sender(ctx);
         assert!(table::contains(&orderbook.orders, order_id), EOrderNotFound);
 
+
         let order = table::borrow(&orderbook.orders, order_id);
         assert!(order.trader == sender, EUnauthorized);
+
 
         let is_bid = order.is_bid;
         let unfilled = order.quantity - order.filled_quantity;
         let refund_amount = order.price * unfilled;
 
+
         table::remove(&mut orderbook.orders, order_id);
         table::remove(&mut orderbook.active_orders, order_id);
+
 
         if (is_bid) {
             let bid_len = vector::length(&orderbook.bid_ids);
@@ -297,10 +548,12 @@ module perpetuity_sui::orderbook {
             };
         };
 
+
         if (refund_amount > 0) {
             let refund = balance::split(&mut market.vault, refund_amount);
             balance::join(&mut user_balance.balance, refund);
         };
+
 
         event::emit(OrderCancelled {
             order_id,
@@ -309,7 +562,9 @@ module perpetuity_sui::orderbook {
         });
     }
 
+
     // ========== SETTLE TRADE ==========
+
 
     public fun settle_trade(
         orderbook: &mut OrderBook,
@@ -325,25 +580,30 @@ module perpetuity_sui::orderbook {
         assert!(table::contains(&orderbook.orders, buyer_order_id), EOrderNotFound);
         assert!(table::contains(&orderbook.orders, seller_order_id), EOrderNotFound);
 
+
         {
             let buyer_order = table::borrow(&orderbook.orders, buyer_order_id);
             assert!(buyer_order.is_bid, EUnauthorized);
         };
+
 
         {
             let seller_order = table::borrow(&orderbook.orders, seller_order_id);
             assert!(!seller_order.is_bid, EUnauthorized);
         };
 
+
         {
             let buyer_order = table::borrow_mut(&mut orderbook.orders, buyer_order_id);
             buyer_order.filled_quantity = buyer_order.filled_quantity + matched_quantity;
         };
 
+
         {
             let seller_order = table::borrow_mut(&mut orderbook.orders, seller_order_id);
             seller_order.filled_quantity = seller_order.filled_quantity + matched_quantity;
         };
+
 
         let buyer_refund_amt = {
             let buyer_order = table::borrow(&orderbook.orders, buyer_order_id);
@@ -351,11 +611,13 @@ module perpetuity_sui::orderbook {
             buyer_order.price * buyer_unfilled
         };
 
+
         let seller_refund_amt = {
             let seller_order = table::borrow(&orderbook.orders, seller_order_id);
             let seller_unfilled = seller_order.quantity - seller_order.filled_quantity;
             seller_order.price * seller_unfilled
         };
+
 
         if (buyer_refund_amt > 0) {
             let refund = balance::split(&mut market.vault, buyer_refund_amt);
@@ -366,6 +628,7 @@ module perpetuity_sui::orderbook {
             balance::join(&mut seller_balance.balance, refund);
         };
 
+
         event::emit(TradeSettled {
             buyer_order_id,
             seller_order_id,
@@ -375,7 +638,9 @@ module perpetuity_sui::orderbook {
         });
     }
 
+
     // ========== VIEW FUNCTIONS ==========
+
 
     public fun get_top_bid(orderbook: &OrderBook): u64 {
         if (vector::length(&orderbook.bid_ids) > 0) {
@@ -388,6 +653,7 @@ module perpetuity_sui::orderbook {
         0
     }
 
+
     public fun get_top_ask(orderbook: &OrderBook): u64 {
         if (vector::length(&orderbook.ask_ids) > 0) {
             let order_id = *vector::borrow(&orderbook.ask_ids, 0);
@@ -399,13 +665,16 @@ module perpetuity_sui::orderbook {
         0
     }
 
+
     public fun get_orderbook_depth(orderbook: &OrderBook): (u64, u64) {
         (vector::length(&orderbook.bid_ids), vector::length(&orderbook.ask_ids))
     }
 
+
     public fun get_user_balance(user_balance: &UserBalance): u64 {
         balance::value(&user_balance.balance)
     }
+
 
     public fun get_market_vault_balance(market: &Market): u64 {
         balance::value(&market.vault)
