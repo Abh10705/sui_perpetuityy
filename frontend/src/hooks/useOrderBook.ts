@@ -23,13 +23,14 @@ export function useOrderBook() {
       if (!obj.data?.content) throw new Error('OrderBook not found');
 
       // Parse the data (adjust based on your contract structure)
-      const content = obj.data.content as any;
+      const content = obj.data.content as Record<string, unknown>;
+      const fields = content.fields as Record<string, unknown>;
       
       setOrderbook({
-        topBid: Number(content.fields?.bid_ids?.[0] || 0),
-        topAsk: Number(content.fields?.ask_ids?.[0] || 0),
-        bidDepth: content.fields?.bid_ids?.length || 0,
-        askDepth: content.fields?.ask_ids?.length || 0,
+        topBid: Number((fields?.bid_ids as unknown[])?.[0] || 0),
+        topAsk: Number((fields?.ask_ids as unknown[])?.[0] || 0),
+        bidDepth: ((fields?.bid_ids as unknown[]) || []).length,
+        askDepth: ((fields?.ask_ids as unknown[]) || []).length,
         bids: [],
         asks: [],
       });
@@ -43,8 +44,8 @@ export function useOrderBook() {
   useEffect(() => {
     fetchOrderBook();
     
-    // Poll every 3 seconds
-    const interval = setInterval(fetchOrderBook, 3000);
+    // Poll every 30 seconds
+    const interval = setInterval(fetchOrderBook, 30000);
     return () => clearInterval(interval);
   }, []);
 

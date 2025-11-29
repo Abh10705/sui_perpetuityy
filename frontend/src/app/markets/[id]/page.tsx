@@ -1,9 +1,12 @@
 'use client';
 
+import { use } from 'react';
 import { OrderBook } from '@/components/OrderBook';
 import { TradingPanel } from '@/components/TradingPanel';
 
-export default function MarketPage({ params }: { params: { id: string } }) {
+export default function MarketPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params);
+
   return (
     <div className="min-h-screen bg-black">
       {/* Header */}
@@ -11,12 +14,12 @@ export default function MarketPage({ params }: { params: { id: string } }) {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex flex-col items-start justify-between gap-4 md:flex-row md:items-center">
             <div>
-              <h1 className="text-4xl font-bold text-white">Will AI achieve AGI?</h1>
-              <p className="mt-2 text-gray-400">Market ID: {params.id}</p>
+              <h1 className="text-4xl font-bold text-white">Who wins? Barca vs Madrid</h1>
+              <p className="mt-2 text-gray-400">Market ID: {id}</p>
             </div>
             <div className="flex gap-3">
-              <button className="px-4 py-2 border border-gray-600 bg-gray-800 text-white rounded-lg hover:border-gray-500">OptionA</button>
-              <button className="px-4 py-2 border border-gray-600 bg-gray-800 text-white rounded-lg hover:border-gray-500">OptionB</button>
+              <button className="px-4 py-2 border border-gray-600 bg-gray-800 text-white rounded-lg hover:border-gray-500">Barca</button>
+              <button className="px-4 py-2 border border-gray-600 bg-gray-800 text-white rounded-lg hover:border-gray-500">Madrid</button>
             </div>
           </div>
         </div>
@@ -87,7 +90,7 @@ export default function MarketPage({ params }: { params: { id: string } }) {
           <div className="grid gap-4 md:grid-cols-2">
             <div className="rounded-lg border border-gray-700 bg-gray-900 p-4">
               <h4 className="text-sm text-gray-400">Question</h4>
-              <p className="mt-2 text-white">Will AI achieve AGI before 2030?</p>
+              <p className="mt-2 text-white">Who wins? Barca vs Madrid</p>
             </div>
             <div className="rounded-lg border border-gray-700 bg-gray-900 p-4">
               <h4 className="text-sm text-gray-400">Status</h4>

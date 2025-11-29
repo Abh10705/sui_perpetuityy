@@ -1,268 +1,112 @@
-// lib/sui/contracts.ts
-// Bridge between Move contract and React UI
-// Currently stub functions - will implement with wallet later
 
-import { CONTRACTS } from '../constants';
-import { OrderBookData } from './types';
+import { Transaction } from '@mysten/sui/transactions';
+
+import { CONTRACTS } from '@/lib/constants';
+
+export interface PlaceOrderResult {
+  success: boolean;
+  txDigest?: string;
+  error?: string;
+}
 
 /**
- * PLACE ORDER - Buy or Sell
- * @param price - Price per unit
- * @param quantity - Number of units
- * @param isBid - true = BUY, false = SELL
- * @param option - 'OptionA' or 'OptionB'
+ * Place an order on the orderbook
+ * @param price Price in SUI
+ * @param quantity Quantity of contracts
+ * @param isBuy true for buy, false for sell
  */
 export async function placeOrder(
   price: number,
   quantity: number,
-  isBid: boolean,
-  option: 'OptionA' | 'OptionB' = 'OptionA'
-): Promise<{ success: boolean; txDigest?: string; error?: string }> {
+  isBuy: boolean
+): Promise<PlaceOrderResult> {
   try {
-    console.log('📊 Place Order:', {
-      price,
-      quantity,
-      side: isBid ? 'BUY' : 'SELL',
-      option,
-      marketId: CONTRACTS.MARKET_ID,
+    // Convert to MIST (1 SUI = 1e9 MIST)
+    const priceMist = Math.floor(price * 1e9);
+    
+    const tx = new Transaction();
+
+    // Build the transaction
+    tx.moveCall({
+      target: `${CONTRACTS.PACKAGE_ID}::orderbook::placeordercli`,
+      arguments: [
+        tx.object(CONTRACTS.ORDERBOOK_ID), // OrderBook
+        tx.object(CONTRACTS.MARKET_ID),    // Market
+        // UserBalance - user will need to have deposited first
+        tx.pure.u64(priceMist),           // Price in MIST
+        tx.pure.u64(quantity),             // Quantity
+        tx.pure.u8(isBuy ? 0 : 1),        // Side: 0 = buy, 1 = sell
+      ],
     });
 
-    // TODO: Build actual Sui transaction
-    // Steps:
-    // 1. Get user wallet address & signer
-    // 2. Get OrderBook object
-    // 3. Get Market object
-    // 4. Get UserBalance object
-    // 5. Build moveCall transaction:
-    //    - Function: place_order (or place_order_cli)
-    //    - Args: [orderbook, market, userBalance, option, price, quantity, isBid]
-    // 6. Sign & execute transaction
-    // 7. Wait for confirmation
-    // 8. Return { success: true, txDigest }
-
-    // Mock response for now
-    return {
-      success: true,
-      txDigest: '0x' + Math.random().toString(16).slice(2),
-    };
-  } catch (error) {
-    console.error('❌ Place order error:', error);
+    // Wallet signer integration needed
+    console.error('Wallet integration needed - cannot sign transaction yet');
+    
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Unknown error',
+      error: 'Wallet not connected. Connect wallet to place orders.',
+    };
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Unknown error',
     };
   }
 }
 
 /**
- * CANCEL ORDER - Remove existing order
- * @param orderId - Order ID to cancel
- */
-export async function cancelOrder(
-  orderId: string
-): Promise<{ success: boolean; txDigest?: string; error?: string }> {
-  try {
-    console.log('❌ Cancel Order:', { orderId });
-
-    // TODO: Build transaction
-    // Function: cancel_order
-    // Args: [orderbook, market, userBalance, orderId]
-
-    return {
-      success: true,
-      txDigest: '0x' + Math.random().toString(16).slice(2),
-    };
-  } catch (error) {
-    console.error('❌ Cancel order error:', error);
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Unknown error',
-    };
-  }
-}
-
-/**
- * DEPOSIT FUNDS - Add SUI to trading balance
- * @param amount - Amount in MIST (1 SUI = 1e9 MIST)
+ * Deposit funds to the market
  */
 export async function depositFunds(
-  amount: bigint
-): Promise<{ success: boolean; txDigest?: string; error?: string }> {
+  amount: number
+): Promise<PlaceOrderResult> {
   try {
-    console.log('💰 Deposit Funds:', { amount: amount.toString() });
+    const amountMist = Math.floor(amount * 1e9);
 
-    // TODO: Build transaction
-    // Function: deposit_funds
-    // Need to:
-    // 1. Get user's SUI coins
-    // 2. Select coins totaling 'amount'
-    // 3. Call deposit_funds with those coins
+    const tx = new Transaction();
 
-    return {
-      success: true,
-      txDigest: '0x' + Math.random().toString(16).slice(2),
-    };
-  } catch (error) {
-    console.error('❌ Deposit error:', error);
+    tx.moveCall({
+      target: `${CONTRACTS.PACKAGE_ID}::orderbook::depositfunds`,
+      arguments: [
+        tx.object(CONTRACTS.MARKET_ID),
+        tx.pure.u64(amountMist),
+      ],
+    });
+
+    console.error('Wallet integration needed - cannot sign transaction yet');
+    
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Unknown error',
+      error: 'Wallet not connected. Connect wallet to deposit.',
     };
-  }
-}
-
-/**
- * WITHDRAW FUNDS - Remove SUI from trading balance
- * @param amount - Amount in MIST
- */
-export async function withdrawFunds(
-  amount: bigint
-): Promise<{ success: boolean; txDigest?: string; error?: string }> {
-  try {
-    console.log('🏦 Withdraw Funds:', { amount: amount.toString() });
-
-    // TODO: Build transaction
-    // Function: withdraw_funds
-    // Args: [userBalance, amount]
-    // Returns new Coin<SUI>
-
-    return {
-      success: true,
-      txDigest: '0x' + Math.random().toString(16).slice(2),
-    };
-  } catch (error) {
-    console.error('❌ Withdraw error:', error);
+  } catch (err) {
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Unknown error',
+      error: err instanceof Error ? err.message : 'Unknown error',
     };
   }
 }
 
 /**
- * GET ORDERBOOK DATA
- * Fetch current bids, asks, depths
+ * Get top bid price
  */
-export async function getOrderBook(): Promise<{
-  data?: OrderBookData;
-  error?: string;
-}> {
+export async function getTopBid(): Promise<number> {
   try {
-    console.log('📖 Fetching OrderBook...');
-
-    // TODO: Query the OrderBook object
-    // Use suiClient.getObject() to fetch CONTRACTS.ORDERBOOK_ID
-    // Parse bid_ids and ask_ids
-    // Fetch each order's details
-    // Return structured OrderBookData
-
-    return {
-      data: {
-        topBid: 0.5,
-        topAsk: 0.51,
-        bidDepth: 0,
-        askDepth: 0,
-        bids: [],
-        asks: [],
-      },
-    };
-  } catch (error) {
-    console.error('❌ Fetch orderbook error:', error);
-    return {
-      error: error instanceof Error ? error.message : 'Unknown error',
-    };
+    return 0;
+  } catch (err) {
+    console.error('Error getting top bid:', err);
+    return 0;
   }
 }
 
 /**
- * GET USER BALANCE
- * Fetch user's SUI balance in market
+ * Get top ask price
  */
-export async function getUserBalance(): Promise<{
-  balance?: bigint;
-  error?: string;
-}> {
+export async function getTopAsk(): Promise<number> {
   try {
-    console.log('👤 Fetching User Balance...');
-
-    // TODO: Query UserBalance object
-    // Use suiClient.getObject() to fetch user's UserBalance
-    // Extract balance field
-    // Return as bigint
-
-    return {
-      balance: BigInt(0),
-    };
-  } catch (error) {
-    console.error('❌ Fetch balance error:', error);
-    return {
-      error: error instanceof Error ? error.message : 'Unknown error',
-    };
-  }
-}
-
-/**
- * GET TOP BID PRICE
- */
-export async function getTopBid(): Promise<{
-  price?: number;
-  error?: string;
-}> {
-  try {
-    console.log('📈 Fetching Top Bid...');
-
-    // TODO: Call get_top_bid() view function
-    // This is a read-only call
-
-    return { price: 0 };
-  } catch (error) {
-    console.error('❌ Fetch top bid error:', error);
-    return {
-      error: error instanceof Error ? error.message : 'Unknown error',
-    };
-  }
-}
-
-/**
- * GET TOP ASK PRICE
- */
-export async function getTopAsk(): Promise<{
-  price?: number;
-  error?: string;
-}> {
-  try {
-    console.log('📉 Fetching Top Ask...');
-
-    // TODO: Call get_top_ask() view function
-
-    return { price: 0 };
-  } catch (error) {
-    console.error('❌ Fetch top ask error:', error);
-    return {
-      error: error instanceof Error ? error.message : 'Unknown error',
-    };
-  }
-}
-
-/**
- * GET ORDERBOOK DEPTH
- * Returns (bid_count, ask_count)
- */
-export async function getOrderbookDepth(): Promise<{
-  bidDepth?: number;
-  askDepth?: number;
-  error?: string;
-}> {
-  try {
-    console.log('📊 Fetching OrderBook Depth...');
-
-    // TODO: Call get_orderbook_depth() view function
-
-    return { bidDepth: 0, askDepth: 0 };
-  } catch (error) {
-    console.error('❌ Fetch depth error:', error);
-    return {
-      error: error instanceof Error ? error.message : 'Unknown error',
-    };
+    return 0;
+  } catch (err) {
+    console.error('Error getting top ask:', err);
+    return 0;
   }
 }

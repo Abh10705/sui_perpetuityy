@@ -1,18 +1,149 @@
 'use client';
 
 import { useState } from 'react';
-import { placeOrder } from '@/lib/sui/contracts';
+import { useSignAndExecuteTransaction } from '@mysten/dapp-kit';
+import { Transaction } from '@mysten/sui/transactions';
+import { useSuiClient } from '@mysten/dapp-kit';
+import { CONTRACTS } from '@/lib/constants';
+
+interface TxResult {
+  digest?: string;
+}
 
 export function TradingPanel() {
+  const [depositAmount, setDepositAmount] = useState('');
   const [side, setSide] = useState<'buy' | 'sell'>('buy');
   const [price, setPrice] = useState('');
   const [quantity, setQuantity] = useState('');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [userBalance, setUserBalance] = useState<string | null>(null);
+  
+  const { mutate: signAndExecute } = useSignAndExecuteTransaction();
+  const suiClient = useSuiClient();
 
   const collateral = price && quantity ? (parseFloat(price) * parseFloat(quantity)).toFixed(4) : '0';
 
+  // Query transaction to extract UserBalance ID
+  const extractUserBalanceFromDigest = async (digest: string): Promise<string | null> => {
+    try {
+      const txResult = await suiClient.getTransactionBlock({
+        digest,
+        options: {
+          showObjectChanges: true,
+        },
+      });
+
+      if (txResult.objectChanges) {
+        for (const change of txResult.objectChanges) {
+          if (
+            change.type === 'created' &&
+            change.objectType?.includes('UserBalance')
+          ) {
+            return change.objectId;
+          }
+        }
+      }
+
+      return null;
+    } catch (err) {
+      console.error('Error querying transaction:', err);
+      return null;
+    }
+  };
+
+  const handleDeposit = async () => {
+    if (!depositAmount) {
+      setMessage({ type: 'error', text: 'Please enter deposit amount' });
+      return;
+    }
+
+    setLoading(true);
+    setMessage(null);
+
+    try {
+      const amountMist = Math.floor(parseFloat(depositAmount) * 1e9);
+      const tx = new Transaction();
+      const [coin] = tx.splitCoins(tx.gas, [amountMist]);
+
+      tx.moveCall({
+        target: `${CONTRACTS.PACKAGE_ID}::orderbook::deposit_funds`,
+        arguments: [
+          tx.pure.u64(1),
+          coin,
+        ],
+      });
+
+      signAndExecute(
+        { transaction: tx },
+        {
+          onSuccess: async (result: TxResult) => {
+            console.log('Deposit success:', result);
+            
+            if (!result.digest) {
+              setMessage({
+                type: 'error',
+                text: 'No transaction digest received',
+              });
+              setLoading(false);
+              return;
+            }
+
+            // Query the transaction to extract UserBalance
+            try {
+              const extractedBalance = await extractUserBalanceFromDigest(result.digest);
+              
+              if (extractedBalance) {
+                setUserBalance(extractedBalance);
+                setMessage({
+                  type: 'success',
+                  text: `Deposited ${depositAmount} SUI! UserBalance: ${extractedBalance.slice(0, 10)}...`,
+                });
+              } else {
+                setMessage({
+                  type: 'success',
+                  text: `Deposited ${depositAmount} SUI! TX: ${result.digest.slice(0, 10)}... (fetching UserBalance...)`,
+                });
+              }
+              
+              setDepositAmount('');
+            } catch (err) {
+              console.error('Error extracting balance:', err);
+              setMessage({
+                type: 'success',
+                text: `Deposited ${depositAmount} SUI! TX: ${result.digest.slice(0, 10)}...`,
+              });
+            }
+            
+            setLoading(false);
+          },
+          onError: (error: Error) => {
+            console.error('Deposit error:', error);
+            setMessage({
+              type: 'error',
+              text: error instanceof Error ? error.message : 'Failed to deposit',
+            });
+            setLoading(false);
+          },
+        }
+      );
+    } catch (err) {
+      console.error('Deposit exception:', err);
+      const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+      setMessage({
+        type: 'error',
+        text: errorMsg,
+      });
+      setLoading(false);
+    }
+  };
+
   const handlePlaceOrder = async () => {
+    if (!userBalance) {
+      setMessage({ type: 'error', text: 'Please deposit funds first' });
+      return;
+    }
+
     if (!price || !quantity) {
       setMessage({ type: 'error', text: 'Please fill in price and quantity' });
       return;
@@ -22,140 +153,179 @@ export function TradingPanel() {
     setMessage(null);
 
     try {
-      const result = await placeOrder(
-        parseFloat(price),
-        parseFloat(quantity),
-        side === 'buy',
-        'OptionA' // Default to OptionA for now
-      );
+      const priceMist = Math.floor(parseFloat(price) * 1e9);
+      const qty = Math.floor(parseFloat(quantity));
+      const tx = new Transaction();
 
-      if (result.success) {
-        setMessage({
-          type: 'success',
-          text: `Order placed! TX: ${result.txDigest?.slice(0, 10)}...`,
-        });
-        setPrice('');
-        setQuantity('');
-      } else {
-        setMessage({ type: 'error', text: result.error || 'Failed to place order' });
-      }
+      tx.moveCall({
+        target: `${CONTRACTS.PACKAGE_ID}::orderbook::place_order_cli`,
+        arguments: [
+          tx.object(CONTRACTS.ORDERBOOK_ID),
+          tx.object(CONTRACTS.MARKET_ID),
+          tx.object(userBalance),
+          tx.pure.u8(0),
+          tx.pure.u64(priceMist),
+          tx.pure.u64(qty),
+          tx.pure.bool(side === 'buy'),
+        ],
+      });
+
+      signAndExecute(
+        { transaction: tx },
+        {
+          onSuccess: (result: TxResult) => {
+            setMessage({
+              type: 'success',
+              text: `Order placed! TX: ${result.digest?.slice(0, 10)}...`,
+            });
+            setPrice('');
+            setQuantity('');
+            setLoading(false);
+          },
+          onError: (error: Error) => {
+            console.error('Order error:', error);
+            setMessage({
+              type: 'error',
+              text: error instanceof Error ? error.message : 'Failed to place order',
+            });
+            setLoading(false);
+          },
+        }
+      );
     } catch (err) {
+      console.error('Order exception:', err);
+      const errorMsg = err instanceof Error ? err.message : 'Unknown error';
       setMessage({
         type: 'error',
-        text: err instanceof Error ? err.message : 'Unknown error',
+        text: errorMsg,
       });
-    } finally {
       setLoading(false);
     }
   };
 
   return (
     <div className="rounded-lg border border-gray-700 bg-gray-900 p-6">
-      <h3 className="mb-6 text-lg font-bold text-white">Place Order</h3>
+      <h3 className="mb-6 text-lg font-bold text-white">Trading Panel</h3>
 
-      {/* Buy/Sell Tabs */}
-      <div className="mb-6 flex gap-2">
-        <button
-          onClick={() => setSide('buy')}
-          className={`flex-1 rounded-lg py-2 font-semibold transition-all ${
-            side === 'buy'
-              ? 'border-2 border-green-500 bg-green-500/10 text-green-400'
-              : 'border border-gray-600 bg-gray-800 text-gray-400 hover:border-gray-500'
-          }`}
-        >
-          Buy
-        </button>
-        <button
-          onClick={() => setSide('sell')}
-          className={`flex-1 rounded-lg py-2 font-semibold transition-all ${
-            side === 'sell'
-              ? 'border-2 border-red-500 bg-red-500/10 text-red-400'
-              : 'border border-gray-600 bg-gray-800 text-gray-400 hover:border-gray-500'
-          }`}
-        >
-          Sell
-        </button>
-      </div>
-
-      {/* Price Input */}
-      <div className="mb-4">
-        <label className="mb-2 block text-sm text-gray-400">Price (SUI)</label>
-        <input
-          type="number"
-          placeholder="0.00"
-          value={price}
-          onChange={(e) => setPrice(e.target.value)}
-          className="w-full rounded-lg border border-gray-600 bg-gray-800 px-4 py-2 text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-500/20"
-          step="0.01"
-          min="0"
-        />
-      </div>
-
-      {/* Quantity Input */}
-      <div className="mb-4">
-        <label className="mb-2 block text-sm text-gray-400">Quantity</label>
-        <input
-          type="number"
-          placeholder="0"
-          value={quantity}
-          onChange={(e) => setQuantity(e.target.value)}
-          className="w-full rounded-lg border border-gray-600 bg-gray-800 px-4 py-2 text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-500/20"
-          step="1"
-          min="0"
-        />
-      </div>
-
-      {/* Collateral Display */}
       <div className="mb-6 rounded-lg bg-gray-800 p-4">
-        <div className="mb-2 flex justify-between text-sm">
-          <span className="text-gray-400">Collateral Required</span>
-          <span className="font-semibold text-white">{collateral} SUI</span>
+        <h4 className="mb-3 text-sm font-semibold text-gray-300">Step 1: Deposit Funds</h4>
+        <div className="flex gap-2">
+          <input
+            type="number"
+            placeholder="Amount (SUI)"
+            value={depositAmount}
+            onChange={(e) => setDepositAmount(e.target.value)}
+            className="flex-1 rounded-lg border border-gray-600 bg-gray-700 px-3 py-2 text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none"
+            step="0.1"
+            min="0"
+          />
+          <button
+            onClick={handleDeposit}
+            disabled={loading || !depositAmount}
+            className="rounded-lg bg-purple-600 px-4 py-2 font-semibold text-white hover:bg-purple-700 disabled:bg-gray-600 disabled:text-gray-400"
+          >
+            Deposit
+          </button>
         </div>
-        <div className="h-1 w-full bg-gray-700 rounded-full overflow-hidden">
-          <div
-            className="h-full bg-gradient-to-r from-purple-500 to-blue-500 transition-all"
-            style={{ width: `${Math.min(parseFloat(collateral) * 10, 100)}%` }}
+      </div>
+
+      <div className="mb-6">
+        <label className="mb-2 block text-sm text-gray-400">UserBalance ID</label>
+        <input
+          type="text"
+          placeholder="0x..."
+          value={userBalance || ''}
+          onChange={(e) => setUserBalance(e.target.value)}
+          className="w-full rounded-lg border border-gray-600 bg-gray-800 px-4 py-2 text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none text-xs"
+        />
+        <p className="mt-1 text-xs text-gray-500">
+          {userBalance ? '✓ Set automatically' : 'Auto-extracted after deposit (or paste manually)'}
+        </p>
+      </div>
+
+      <div className="mb-6 border-t border-gray-700 pt-6">
+        <h4 className="mb-4 text-sm font-semibold text-gray-300">Step 2: Place Order</h4>
+
+        <div className="mb-6 flex gap-2">
+          <button
+            onClick={() => setSide('buy')}
+            className={`flex-1 rounded-lg py-2 font-semibold transition-all ${
+              side === 'buy'
+                ? 'border-2 border-green-500 bg-green-500/10 text-green-400'
+                : 'border border-gray-600 bg-gray-800 text-gray-400'
+            }`}
+          >
+            Buy
+          </button>
+          <button
+            onClick={() => setSide('sell')}
+            className={`flex-1 rounded-lg py-2 font-semibold transition-all ${
+              side === 'sell'
+                ? 'border-2 border-red-500 bg-red-500/10 text-red-400'
+                : 'border border-gray-600 bg-gray-800 text-gray-400'
+            }`}
+          >
+            Sell
+          </button>
+        </div>
+
+        <div className="mb-4">
+          <label className="mb-2 block text-sm text-gray-400">Price (SUI)</label>
+          <input
+            type="number"
+            placeholder="0.00"
+            value={price}
+            onChange={(e) => setPrice(e.target.value)}
+            className="w-full rounded-lg border border-gray-600 bg-gray-800 px-4 py-2 text-white"
+            step="0.01"
+            min="0"
           />
         </div>
+
+        <div className="mb-4">
+          <label className="mb-2 block text-sm text-gray-400">Quantity</label>
+          <input
+            type="number"
+            placeholder="0"
+            value={quantity}
+            onChange={(e) => setQuantity(e.target.value)}
+            className="w-full rounded-lg border border-gray-600 bg-gray-800 px-4 py-2 text-white"
+            step="1"
+            min="0"
+          />
+        </div>
+
+        <div className="mb-6 rounded-lg bg-gray-800 p-4">
+          <div className="flex justify-between text-sm">
+            <span className="text-gray-400">Collateral</span>
+            <span className="font-semibold text-white">{collateral} SUI</span>
+          </div>
+        </div>
       </div>
 
-      {/* Message Display */}
       {message && (
         <div
-          className={`mb-4 rounded-lg p-3 text-sm font-medium ${
+          className={`mb-4 rounded-lg p-3 text-sm ${
             message.type === 'success'
-              ? 'border border-green-500/30 bg-green-500/10 text-green-400'
-              : 'border border-red-500/30 bg-red-500/10 text-red-400'
+              ? 'bg-green-500/10 text-green-400'
+              : 'bg-red-500/10 text-red-400'
           }`}
         >
           {message.text}
         </div>
       )}
 
-      {/* Submit Button */}
       <button
         onClick={handlePlaceOrder}
-        disabled={loading || !price || !quantity}
-        className={`w-full rounded-lg py-3 font-bold transition-all ${
+        disabled={loading || !price || !quantity || !userBalance}
+        className={`w-full rounded-lg py-3 font-bold ${
           side === 'buy'
-            ? 'bg-green-500 text-white hover:bg-green-600 disabled:bg-gray-600 disabled:text-gray-400'
-            : 'bg-red-500 text-white hover:bg-red-600 disabled:bg-gray-600 disabled:text-gray-400'
-        }`}
+            ? 'bg-green-500 hover:bg-green-600 disabled:bg-gray-600'
+            : 'bg-red-500 hover:bg-red-600 disabled:bg-gray-600'
+        } text-white`}
       >
-        {loading ? (
-          <span className="flex items-center justify-center gap-2">
-            <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-            Placing order...
-          </span>
-        ) : (
-          `${side === 'buy' ? 'Buy' : 'Sell'} ${quantity || '0'} @ ${price || '0.00'} SUI`
-        )}
+        {loading ? 'Processing...' : `${side === 'buy' ? 'Buy' : 'Sell'} ${quantity || '0'} @ ${price || '0.00'} SUI`}
       </button>
-
-      {/* Info Text */}
-      <p className="mt-4 text-xs text-gray-500">
-        💡 Connected wallet required to place orders. Collateral will be reserved.
-      </p>
     </div>
   );
 }
