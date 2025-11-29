@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useSignAndExecuteTransaction } from '@mysten/dapp-kit';
 import { Transaction } from '@mysten/sui/transactions';
 import { useSuiClient } from '@mysten/dapp-kit';
+import { SuiObjectChange } from '@mysten/sui/client';
 import { CONTRACTS } from '@/lib/constants';
 
 interface TxResult {
@@ -24,32 +25,67 @@ export function TradingPanel() {
 
   const collateral = price && quantity ? (parseFloat(price) * parseFloat(quantity)).toFixed(4) : '0';
 
-  // Query transaction to extract UserBalance ID
-  const extractUserBalanceFromDigest = async (digest: string): Promise<string | null> => {
-    try {
-      const txResult = await suiClient.getTransactionBlock({
-        digest,
-        options: {
-          showObjectChanges: true,
-        },
-      });
+  // Query transaction to extract UserBalance ID with retry logic
+  const extractUserBalanceFromDigest = async (
+    digest: string,
+    maxRetries: number = 5
+  ): Promise<string | null> => {
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        // Wait before querying (increases with each retry)
+        await new Promise((resolve) =>
+          setTimeout(resolve, 1000 * Math.pow(2, attempt))
+        ); // 1s, 2s, 4s, 8s, 16s
 
-      if (txResult.objectChanges) {
-        for (const change of txResult.objectChanges) {
-          if (
-            change.type === 'created' &&
-            change.objectType?.includes('UserBalance')
-          ) {
-            return change.objectId;
+        console.log(`Attempt ${attempt + 1}/${maxRetries}: Querying transaction...`);
+
+        const txResult = await suiClient.getTransactionBlock({
+          digest,
+          options: {
+            showObjectChanges: true,
+          },
+        });
+
+        if (!txResult) {
+          console.log(`Attempt ${attempt + 1}: Transaction not found yet...`);
+          continue;
+        }
+
+        // Extract UserBalance from created objects
+        if (txResult.objectChanges) {
+          const userBalance = txResult.objectChanges.find(
+            (change: SuiObjectChange) => {
+              // Type guard for created objects
+              if ('objectType' in change && 'objectId' in change) {
+                return (
+                  change.type === 'created' &&
+                  typeof change.objectType === 'string' &&
+                  change.objectType.includes('UserBalance')
+                );
+              }
+              return false;
+            }
+          );
+
+          if (userBalance && 'objectId' in userBalance) {
+            console.log('✅ UserBalance found:', userBalance.objectId);
+            return userBalance.objectId;
           }
         }
-      }
 
-      return null;
-    } catch (err) {
-      console.error('Error querying transaction:', err);
-      return null;
+        console.log(
+          `Attempt ${attempt + 1}: UserBalance not in transaction changes`
+        );
+      } catch (error) {
+        console.log(
+          `Attempt ${attempt + 1} failed:`,
+          (error as Error).message
+        );
+      }
     }
+
+    console.error('❌ Could not extract UserBalance after retries');
+    return null;
   };
 
   const handleDeposit = async () => {
@@ -89,29 +125,33 @@ export function TradingPanel() {
               return;
             }
 
-            // Query the transaction to extract UserBalance
+            // Query the transaction to extract UserBalance with retries
             try {
+              setMessage({
+                type: 'success',
+                text: `Deposit sent! Extracting UserBalance...`,
+              });
+
               const extractedBalance = await extractUserBalanceFromDigest(result.digest);
               
               if (extractedBalance) {
                 setUserBalance(extractedBalance);
                 setMessage({
                   type: 'success',
-                  text: `Deposited ${depositAmount} SUI! UserBalance: ${extractedBalance.slice(0, 10)}...`,
+                  text: `✅ Deposited ${depositAmount} SUI! UserBalance: ${extractedBalance.slice(0, 10)}...`,
                 });
+                setDepositAmount('');
               } else {
                 setMessage({
-                  type: 'success',
-                  text: `Deposited ${depositAmount} SUI! TX: ${result.digest.slice(0, 10)}... (fetching UserBalance...)`,
+                  type: 'error',
+                  text: `Deposit successful but UserBalance not found. Please paste the ID manually from Sui Explorer (TX: ${result.digest.slice(0, 10)}...)`,
                 });
               }
-              
-              setDepositAmount('');
             } catch (err) {
               console.error('Error extracting balance:', err);
               setMessage({
                 type: 'success',
-                text: `Deposited ${depositAmount} SUI! TX: ${result.digest.slice(0, 10)}...`,
+                text: `Deposited ${depositAmount} SUI! TX: ${result.digest.slice(0, 10)}... (Please paste UserBalance ID manually)`,
               });
             }
             
@@ -224,7 +264,7 @@ export function TradingPanel() {
             disabled={loading || !depositAmount}
             className="rounded-lg bg-purple-600 px-4 py-2 font-semibold text-white hover:bg-purple-700 disabled:bg-gray-600 disabled:text-gray-400"
           >
-            Deposit
+            {loading ? 'Processing...' : 'Deposit'}
           </button>
         </div>
       </div>
@@ -276,7 +316,7 @@ export function TradingPanel() {
             placeholder="0.00"
             value={price}
             onChange={(e) => setPrice(e.target.value)}
-            className="w-full rounded-lg border border-gray-600 bg-gray-800 px-4 py-2 text-white"
+            className="w-full rounded-lg border border-gray-600 bg-gray-800 px-4 py-2 text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none"
             step="0.01"
             min="0"
           />
@@ -289,7 +329,7 @@ export function TradingPanel() {
             placeholder="0"
             value={quantity}
             onChange={(e) => setQuantity(e.target.value)}
-            className="w-full rounded-lg border border-gray-600 bg-gray-800 px-4 py-2 text-white"
+            className="w-full rounded-lg border border-gray-600 bg-gray-800 px-4 py-2 text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none"
             step="1"
             min="0"
           />
@@ -322,7 +362,7 @@ export function TradingPanel() {
           side === 'buy'
             ? 'bg-green-500 hover:bg-green-600 disabled:bg-gray-600'
             : 'bg-red-500 hover:bg-red-600 disabled:bg-gray-600'
-        } text-white`}
+        } text-white disabled:text-gray-400 disabled:cursor-not-allowed transition-all`}
       >
         {loading ? 'Processing...' : `${side === 'buy' ? 'Buy' : 'Sell'} ${quantity || '0'} @ ${price || '0.00'} SUI`}
       </button>

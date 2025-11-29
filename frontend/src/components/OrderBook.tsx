@@ -9,6 +9,12 @@ export function OrderBook() {
   if (error) return <div className="card p-4 text-red-500">Error: {error}</div>;
   if (!orderbook) return <div className="card p-4">No data</div>;
 
+  // Helper to convert MIST to SUI with proper formatting
+  const formatPrice = (mistValue: number): string => {
+    const sui = mistValue / 1e9; // Convert MIST to SUI
+    return sui.toFixed(6); // Show 6 decimals
+  };
+
   return (
     <div className="space-y-4">
       {/* Header */}
@@ -18,11 +24,15 @@ export function OrderBook() {
         <div className="grid grid-cols-2 gap-4 mb-4">
           <div>
             <p className="text-sm text-gray-400">Top Bid</p>
-            <p className="text-lg font-bold text-green-400">${orderbook.topBid / 100000000}</p>
+            <p className="text-lg font-bold text-green-400">
+              {orderbook.topBid > 0 ? `$${formatPrice(orderbook.topBid)}` : '$0.000000'}
+            </p>
           </div>
           <div>
             <p className="text-sm text-gray-400">Top Ask</p>
-            <p className="text-lg font-bold text-red-400">${orderbook.topAsk / 100000000}</p>
+            <p className="text-lg font-bold text-red-400">
+              {orderbook.topAsk > 0 ? `$${formatPrice(orderbook.topAsk)}` : '$0.000000'}
+            </p>
           </div>
         </div>
       </div>
@@ -35,8 +45,8 @@ export function OrderBook() {
             {orderbook.bids.length > 0 ? (
               orderbook.bids.map((bid) => (
                 <div key={bid.order_id} className="flex justify-between">
-                  <span>${(bid.price / 100000000).toFixed(6)}</span>
-                  <span>{bid.quantity}</span>
+                  <span>${formatPrice(bid.price)}</span>
+                  <span>{bid.quantity - bid.filled_quantity}</span>
                 </div>
               ))
             ) : (
@@ -51,8 +61,8 @@ export function OrderBook() {
             {orderbook.asks.length > 0 ? (
               orderbook.asks.map((ask) => (
                 <div key={ask.order_id} className="flex justify-between">
-                  <span>${(ask.price / 100000000).toFixed(6)}</span>
-                  <span>{ask.quantity}</span>
+                  <span>${formatPrice(ask.price)}</span>
+                  <span>{ask.quantity - ask.filled_quantity}</span>
                 </div>
               ))
             ) : (

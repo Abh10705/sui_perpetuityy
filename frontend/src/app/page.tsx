@@ -1,8 +1,15 @@
 'use client';
 
-import { ConnectButton } from '@mysten/dapp-kit';
+import dynamic from 'next/dynamic';
 import Link from 'next/link';
-import { CONTRACTS, MARKETS } from '@/lib/constants';
+import { MARKETS } from '@/lib/constants';
+import { DebugOrderBook } from '@/components/DebugOrderBook';
+
+// Dynamically import ConnectButton to avoid hydration mismatch
+const ConnectButton = dynamic(
+  () => import('@mysten/dapp-kit').then(mod => ({ default: mod.ConnectButton })),
+  { ssr: false }
+);
 
 export default function HomePage() {
   const market = MARKETS[0];
@@ -83,6 +90,12 @@ export default function HomePage() {
               </button>
             </div>
           </Link>
+        </div>
+
+        {/* Debug OrderBook Section */}
+        <div className="mt-16">
+          <h3 className="text-2xl font-bold mb-4">Debug Info</h3>
+          <DebugOrderBook />
         </div>
 
         {/* Footer CTA */}

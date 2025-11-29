@@ -3,6 +3,7 @@
 import { use } from 'react';
 import { OrderBook } from '@/components/OrderBook';
 import { TradingPanel } from '@/components/TradingPanel';
+import { MatchingDebug } from '@/components/MatchingDebug';
 
 export default function MarketPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -38,6 +39,9 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
             <TradingPanel />
           </div>
         </div>
+
+        {/* Matching Debug */}
+        <MatchingDebug />
 
         {/* Info Section */}
         <div className="mt-12 grid gap-6 md:grid-cols-3">
