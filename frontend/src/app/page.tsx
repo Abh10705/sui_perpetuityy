@@ -2,8 +2,8 @@
 
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
+import Image from 'next/image';
 import { MARKETS } from '@/lib/constants';
-import { DebugOrderBook } from '@/components/DebugOrderBook';
 
 // Dynamically import ConnectButton to avoid hydration mismatch
 const ConnectButton = dynamic(
@@ -12,98 +12,96 @@ const ConnectButton = dynamic(
 );
 
 export default function HomePage() {
-  const market = MARKETS[0];
-
   return (
-    <main className="min-h-screen bg-black text-white">
-      <div className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
+    <main className="min-h-screen bg-black text-white flex flex-col font-sans">
+      <div className="max-w-6xl mx-auto w-full py-8 px-4 sm:px-6 lg:px-8 flex-grow">
         
         {/* Header */}
-        <header className="flex justify-between items-center mb-16 pb-8 border-b border-gray-700">
+        <header className="flex justify-between items-center mb-24 pt-4">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-purple-600 to-blue-600 flex items-center justify-center">
-              <span className="text-lg font-bold">P</span>
+            <div className="relative w-10 h-10">
+              <Image 
+                src="/logo.png" 
+                alt="Perpetuity Logo" 
+                width={40} 
+                height={40} 
+                className="object-contain"
+                priority
+              />
             </div>
-            <h1 className="text-3xl font-bold tracking-tight">Perpetuity</h1>
+            <h1 className="text-2xl font-bold tracking-tight">Perpetuity</h1>
           </div>
           <ConnectButton />
         </header>
 
         {/* Hero Section */}
-        <div className="text-center mb-16">
-          <h2 className="text-6xl font-extrabold mb-4 bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent">
+        <div className="text-center mb-24">
+          <h2 className="text-5xl md:text-6xl font-bold mb-6 tracking-tight">
             Trade Your Beliefs
           </h2>
-          <p className="text-lg text-neutral-400 max-w-2xl mx-auto">
-            Orderbook-based prediction markets on Sui. Buy and sell binary outcomes. 
-            No AMM. Pure price discovery.
+          <p className="text-xl text-neutral-400 max-w-2xl mx-auto">
+            The world&apos;s first perpetual market on Sui.
           </p>
         </div>
 
-        {/* Market Section */}
-        <div>
-          <div className="flex items-center justify-between mb-8">
-            <div>
-              <h3 className="text-2xl font-bold">Active Market</h3>
-              <p className="text-gray-400 text-sm mt-1">1 market available</p>
-            </div>
+        {/* Debates Section */}
+        <div className="mb-20">
+          <h3 className="text-xl font-bold mb-8 text-neutral-200">Debates</h3>
+
+          {/* GRID LAYOUT */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {MARKETS.map((market) => {
+              // Placeholder percentage for UI demo. In real app, calculate from price.
+              const percentage = 50; 
+
+              return (
+              <Link key={market.id} href={`/markets/${market.id}`}>
+                <div className="group h-full flex flex-col justify-between p-6 rounded-2xl bg-neutral-900 hover:bg-neutral-800/80 transition-all cursor-pointer border border-neutral-800">
+                  
+                  {/* Card Top: Title & Percentage */}
+                  <div className="flex justify-between items-start mb-6 gap-4">
+                    <h4 className="text-lg font-bold text-white leading-snug">
+                      {market.title}
+                    </h4>
+                    {/* Percentage Circle */}
+                    <div className="flex-shrink-0 w-12 h-12 rounded-full border-2 border-neutral-700 flex items-center justify-center text-sm font-bold text-neutral-300">
+                      {percentage}%
+                    </div>
+                  </div>
+
+                  {/* Volume Icon */}
+                  <div className="flex items-center gap-2 mb-8 text-neutral-500 text-sm font-medium">
+                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                       <path d="M15.5 2A1.5 1.5 0 0014 3.5v13a1.5 1.5 0 001.5 1.5h1a1.5 1.5 0 001.5-1.5v-13A1.5 1.5 0 0016.5 2h-1zM9.5 6A1.5 1.5 0 008 7.5v9A1.5 1.5 0 009.5 18h1a1.5 1.5 0 001.5-1.5v-9A1.5 1.5 0 0010.5 6h-1zM3.5 10A1.5 1.5 0 002 11.5v5A1.5 1.5 0 003.5 18h1A1.5 1.5 0 006 16.5v-5A1.5 1.5 0 004.5 10h-1z" />
+                     </svg>
+                     <span>$1.2k Volume</span>
+                  </div>
+
+                  {/* YES / NO Buttons */}
+                  <div className="grid grid-cols-2 gap-3 mt-auto">
+                    <button className="bg-white text-black font-bold py-3 rounded-xl hover:bg-neutral-200 transition-colors">
+                      YES
+                    </button>
+                    <button className="bg-neutral-800 text-white font-bold py-3 rounded-xl hover:bg-neutral-700 transition-colors border border-neutral-700">
+                      NO
+                    </button>
+                  </div>
+                </div>
+              </Link>
+            )})}
           </div>
-
-          {/* Single Market Card */}
-          <Link href={`/markets/${market.id}`}>
-            <div className="group max-w-md p-6 rounded-lg border border-gray-700 bg-gray-900 hover:border-purple-500 hover:bg-gray-800/50 transition-all cursor-pointer">
-              
-              {/* Title */}
-              <h4 className="text-lg font-semibold mb-4 group-hover:text-purple-400 transition-colors">
-                {market.title}
-              </h4>
-
-              {/* Options with Prices */}
-              <div className="space-y-3 mb-6">
-                <div className="flex items-center justify-between">
-                  <span className="text-gray-300">{market.optionA}</span>
-                  <span className="font-mono text-green-400 font-semibold">50¢</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-gray-300">{market.optionB}</span>
-                  <span className="font-mono text-red-400 font-semibold">50¢</span>
-                </div>
-              </div>
-
-              {/* Stats */}
-              <div className="border-t border-gray-700 pt-4 mb-4">
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <p className="text-gray-500 text-xs">Market ID</p>
-                    <p className="text-white font-mono text-xs">{market.id}</p>
-                  </div>
-                  <div>
-                    <p className="text-gray-500 text-xs">Status</p>
-                    <p className="text-green-400 font-semibold">Active</p>
-                  </div>
-                </div>
-              </div>
-
-              {/* CTA */}
-              <button className="w-full py-2 px-4 rounded-lg bg-purple-600 text-white font-semibold hover:bg-purple-700 transition-all group-hover:shadow-lg group-hover:shadow-purple-500/50">
-                Trade Now →
-              </button>
-            </div>
-          </Link>
-        </div>
-
-        {/* Debug OrderBook Section */}
-        <div className="mt-16">
-          <h3 className="text-2xl font-bold mb-4">Debug Info</h3>
-          <DebugOrderBook />
-        </div>
-
-        {/* Footer CTA */}
-        <div className="mt-20 text-center py-12 rounded-lg border border-gray-700 bg-gray-900/50">
-          <h3 className="text-2xl font-bold mb-4">Ready to start trading?</h3>
-          <p className="text-gray-400 mb-6">Connect your wallet above to place your first order</p>
         </div>
       </div>
+
+      {/* Simple Footer */}
+      <footer className="py-12 text-center text-neutral-500 text-sm">
+        <div className="mb-4 flex items-center justify-center gap-6 font-medium text-neutral-400">
+          <a href="#" className="hover:text-white">Markets</a>
+          <a href="#" className="hover:text-white">Twitter</a>
+          <a href="#" className="hover:text-white">Discord</a>
+        </div>
+        © 2024 Perpetuity.
+      </footer>
     </main>
   );
 }
