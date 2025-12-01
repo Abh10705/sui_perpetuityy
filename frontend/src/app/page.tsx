@@ -16,20 +16,24 @@ export default function HomePage() {
     <main className="min-h-screen bg-black text-white flex flex-col font-sans">
       <div className="max-w-6xl mx-auto w-full py-8 px-4 sm:px-6 lg:px-8 flex-grow">
         
-        {/* Header */}
-        <header className="flex justify-between items-center mb-24 pt-4">
-          <div className="flex items-center gap-3">
-            <div className="relative w-10 h-10">
+        {/* Header - Updated with Bigger Logo & Text */}
+        <header className="flex justify-between items-center mb-24 pt-6">
+          <div className="flex items-center gap-5">
+            {/* Logo Container: w-14 is 56px */}
+            <div className="relative w-14 h-14">
               <Image 
                 src="/logo.png" 
                 alt="Perpetuity Logo" 
-                width={40} 
-                height={40} 
+                width={56} 
+                height={56} 
                 className="object-contain"
                 priority
               />
             </div>
-            <h1 className="text-2xl font-bold tracking-tight">Perpetuity</h1>
+            {/* Heading: text-4xl is much bolder */}
+            <h1 className="text-4xl font-bold tracking-tight text-white">
+              Perpetuity
+            </h1>
           </div>
           <ConnectButton />
         </header>
@@ -80,10 +84,10 @@ export default function HomePage() {
                   {/* YES / NO Buttons */}
                   <div className="grid grid-cols-2 gap-3 mt-auto">
                     <button className="bg-white text-black font-bold py-3 rounded-xl hover:bg-neutral-200 transition-colors">
-                      YES
+                      barca
                     </button>
                     <button className="bg-neutral-800 text-white font-bold py-3 rounded-xl hover:bg-neutral-700 transition-colors border border-neutral-700">
-                      NO
+                      madrid
                     </button>
                   </div>
                 </div>

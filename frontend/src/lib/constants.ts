@@ -10,7 +10,7 @@ export const CONTRACTS = {
   ORDERBOOK_ID: '0x356be0dbfea0e7fb41855a4841529d5b6b3f9cddfeb2bf3e814d6a461b00e8ad',
   
   // Market details
-  MARKET_QUESTION: 'Who wins? Barca vs Madrid',
+  MARKET_QUESTION: 'Which team is better? Barca or Madrid',
   OPTION_A: 'Barca',
   OPTION_B: 'Madrid',
 };

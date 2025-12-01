@@ -15,7 +15,7 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex flex-col items-start justify-between gap-4 md:flex-row md:items-center">
             <div>
-              <h1 className="text-4xl font-bold text-white">Who wins? Barca vs Madrid</h1>
+              <h1 className="text-4xl font-bold text-white">Which team is better? Barca or Madrid</h1>
               <p className="mt-2 text-gray-400">Market ID: {id}</p>
             </div>
             <div className="flex gap-3">
@@ -94,7 +94,7 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
           <div className="grid gap-4 md:grid-cols-2">
             <div className="rounded-lg border border-gray-700 bg-gray-900 p-4">
               <h4 className="text-sm text-gray-400">Question</h4>
-              <p className="mt-2 text-white">Who wins? Barca vs Madrid</p>
+              <p className="mt-2 text-white">Which team is better? Barca or Madrid</p>
             </div>
             <div className="rounded-lg border border-gray-700 bg-gray-900 p-4">
               <h4 className="text-sm text-gray-400">Status</h4>
