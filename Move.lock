@@ -2,50 +2,28 @@
 
 [move]
 version = 3
-manifest_digest = "EC91664095A80C9BAD772F552CAAD4BA90B33AEA6777D6A9DD64E18496302D00"
-deps_digest = "F9B494B64F0615AED0E98FC12A85B85ECD2BC5185C22D30E7F67786BB52E507C"
+manifest_digest = "D208CD220EEF763B6ED66313BCEB36CCD387B83712DC7FE03568CF7B63018818"
+deps_digest = "F8BBB0CCB2491CA29A3DF03D6F92277A4F3574266507ACD77214D37ECA3F3082"
 dependencies = [
-  { id = "Bridge", name = "Bridge" },
-  { id = "MoveStdlib", name = "MoveStdlib" },
-  { id = "Sui", name = "Sui" },
-  { id = "SuiSystem", name = "SuiSystem" },
-]
-
-[[move.package]]
-id = "Bridge"
-source = { git = "https://github.com/MystenLabs/sui.git", rev = "c1f1ae650fb9f9248b39a569400b4420820868db", subdir = "crates/sui-framework/packages/bridge" }
-
-dependencies = [
-  { id = "MoveStdlib", name = "MoveStdlib" },
-  { id = "Sui", name = "Sui" },
-  { id = "SuiSystem", name = "SuiSystem" },
+  { id = "One", name = "One" },
 ]
 
 [[move.package]]
 id = "MoveStdlib"
-source = { git = "https://github.com/MystenLabs/sui.git", rev = "c1f1ae650fb9f9248b39a569400b4420820868db", subdir = "crates/sui-framework/packages/move-stdlib" }
+source = { git = "https://github.com/one-chain-labs/onechain.git", rev = "main", subdir = "crates/sui-framework/packages/move-stdlib" }
 
 [[move.package]]
-id = "Sui"
-source = { git = "https://github.com/MystenLabs/sui.git", rev = "c1f1ae650fb9f9248b39a569400b4420820868db", subdir = "crates/sui-framework/packages/sui-framework" }
+id = "One"
+source = { git = "https://github.com/one-chain-labs/onechain.git", rev = "main", subdir = "crates/sui-framework/packages/one-framework" }
 
 dependencies = [
   { id = "MoveStdlib", name = "MoveStdlib" },
-]
-
-[[move.package]]
-id = "SuiSystem"
-source = { git = "https://github.com/MystenLabs/sui.git", rev = "c1f1ae650fb9f9248b39a569400b4420820868db", subdir = "crates/sui-framework/packages/sui-system" }
-
-dependencies = [
-  { id = "MoveStdlib", name = "MoveStdlib" },
-  { id = "Sui", name = "Sui" },
 ]
 
 [move.toolchain-version]
-compiler-version = "1.61.2"
+compiler-version = "1.0.6"
 edition = "2024.beta"
-flavor = "sui"
+flavor = "one"
 
 [env]
 
@@ -53,4 +31,10 @@ flavor = "sui"
 chain-id = "a4bc10c3"
 original-published-id = "0x85e477bdc976e6303dc3e08067a7dd06a8c6a20012247d265336949244d5eb83"
 latest-published-id = "0x85e477bdc976e6303dc3e08067a7dd06a8c6a20012247d265336949244d5eb83"
+published-version = "1"
+
+[env.onechain-testnet]
+chain-id = "1bd5c965"
+original-published-id = "0xe701e47e7f517f11840529facb5cf22e01115bdbf115b79cb9ce00d7dd6e3477"
+latest-published-id = "0xe701e47e7f517f11840529facb5cf22e01115bdbf115b79cb9ce00d7dd6e3477"
 published-version = "1"
