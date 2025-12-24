@@ -1,17 +1,17 @@
-    # Perpetuity - Decentralized Prediction Market on Sui
+# Perpetuity - Decentralized Prediction Market on Sui
 
-    A fully functional decentralized prediction market with on-chain orderbook matching and automatic trade settlement.
+A fully functional decentralized prediction market with on-chain orderbook matching and automatic trade settlement.
 
-    ## 🎯 Overview
+## 🎯 Overview
 
-    Perpetuity is a prediction market protocol on the Sui blockchain where users can trade outcome predictions with real-time order matching and settlement.
+Perpetuity is a prediction market protocol on the Sui blockchain where users can trade outcome predictions with real-time order matching and settlement.
 
-    **Example:** "Which team is better?" 
+**Example:** "Which team is better?" 
     - Users buy barca @ 40¢ 
     - Users sell madrid @ 60¢   
     - Orders automatically match on-chain when prices meet
 
-    ## ✨ Features
+## ✨ Features
 
     ### ✅ Current (Phase 1)
     - **On-Chain Orderbook** - All orders and matching logic on Sui smart contract
@@ -30,6 +30,6 @@
     - Automatic Order Cleanup
     - Historical Trades Display
 
-    ## 🏗️ Architecture
+## 🏗️ Architecture
 
     ### Smart Contract (Move/Sui)
