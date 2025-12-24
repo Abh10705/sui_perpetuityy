@@ -25,17 +25,15 @@ export function TradingPanel() {
 
   const collateral = price && quantity ? (parseFloat(price) * parseFloat(quantity)).toFixed(4) : '0';
 
-  // Query transaction to extract UserBalance ID with retry logic
   const extractUserBalanceFromDigest = async (
     digest: string,
     maxRetries: number = 5
   ): Promise<string | null> => {
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
-        // Wait before querying (increases with each retry)
         await new Promise((resolve) =>
           setTimeout(resolve, 1000 * Math.pow(2, attempt))
-        ); // 1s, 2s, 4s, 8s, 16s
+        );
 
         console.log(`Attempt ${attempt + 1}/${maxRetries}: Querying transaction...`);
 
@@ -51,11 +49,9 @@ export function TradingPanel() {
           continue;
         }
 
-        // Extract UserBalance from created objects
         if (txResult.objectChanges) {
           const userBalance = txResult.objectChanges.find(
             (change: SuiObjectChange) => {
-              // Type guard for created objects
               if ('objectType' in change && 'objectId' in change) {
                 return (
                   change.type === 'created' &&
@@ -104,6 +100,7 @@ export function TradingPanel() {
 
       tx.moveCall({
         target: `${CONTRACTS.PACKAGE_ID}::orderbook::deposit_funds`,
+        typeArguments: ['0x2::oct::OCT'],
         arguments: [
           tx.pure.u64(1),
           coin,
@@ -125,7 +122,6 @@ export function TradingPanel() {
               return;
             }
 
-            // Query the transaction to extract UserBalance with retries
             try {
               setMessage({
                 type: 'success',
@@ -138,20 +134,20 @@ export function TradingPanel() {
                 setUserBalance(extractedBalance);
                 setMessage({
                   type: 'success',
-                  text: `✅ Deposited ${depositAmount} SUI! UserBalance: ${extractedBalance.slice(0, 10)}...`,
+                  text: `✅ Deposited ${depositAmount} OCT! UserBalance: ${extractedBalance.slice(0, 10)}...`,
                 });
                 setDepositAmount('');
               } else {
                 setMessage({
                   type: 'error',
-                  text: `Deposit successful but UserBalance not found. Please paste the ID manually from Sui Explorer (TX: ${result.digest.slice(0, 10)}...)`,
+                  text: `Deposit successful but UserBalance not found. Please paste the ID manually from Explorer (TX: ${result.digest.slice(0, 10)}...)`,
                 });
               }
             } catch (err) {
               console.error('Error extracting balance:', err);
               setMessage({
                 type: 'success',
-                text: `Deposited ${depositAmount} SUI! TX: ${result.digest.slice(0, 10)}... (Please paste UserBalance ID manually)`,
+                text: `Deposited ${depositAmount} OCT! TX: ${result.digest.slice(0, 10)}... (Please paste UserBalance ID manually)`,
               });
             }
             
@@ -199,6 +195,7 @@ export function TradingPanel() {
 
       tx.moveCall({
         target: `${CONTRACTS.PACKAGE_ID}::orderbook::place_order_cli`,
+        typeArguments: ['0x2::oct::OCT'],
         arguments: [
           tx.object(CONTRACTS.ORDERBOOK_ID),
           tx.object(CONTRACTS.MARKET_ID),
@@ -252,7 +249,7 @@ export function TradingPanel() {
         <div className="flex gap-2">
           <input
             type="number"
-            placeholder="Amount (SUI)"
+            placeholder="Amount (OCT)"
             value={depositAmount}
             onChange={(e) => setDepositAmount(e.target.value)}
             className="flex-1 rounded-lg border border-gray-600 bg-gray-700 px-3 py-2 text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none"
@@ -310,7 +307,7 @@ export function TradingPanel() {
         </div>
 
         <div className="mb-4">
-          <label className="mb-2 block text-sm text-gray-400">Price (SUI)</label>
+          <label className="mb-2 block text-sm text-gray-400">Price (OCT)</label>
           <input
             type="number"
             placeholder="0.00"
@@ -338,7 +335,7 @@ export function TradingPanel() {
         <div className="mb-6 rounded-lg bg-gray-800 p-4">
           <div className="flex justify-between text-sm">
             <span className="text-gray-400">Collateral</span>
-            <span className="font-semibold text-white">{collateral} SUI</span>
+            <span className="font-semibold text-white">{collateral} OCT</span>
           </div>
         </div>
       </div>
@@ -364,7 +361,7 @@ export function TradingPanel() {
             : 'bg-red-500 hover:bg-red-600 disabled:bg-gray-600'
         } text-white disabled:text-gray-400 disabled:cursor-not-allowed transition-all`}
       >
-        {loading ? 'Processing...' : `${side === 'buy' ? 'Buy' : 'Sell'} ${quantity || '0'} @ ${price || '0.00'} SUI`}
+        {loading ? 'Processing...' : `${side === 'buy' ? 'Buy' : 'Sell'} ${quantity || '0'} @ ${price || '0.00'} OCT`}
       </button>
     </div>
   );
