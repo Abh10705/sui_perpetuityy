@@ -11,14 +11,19 @@ interface TxResult {
   digest?: string;
 }
 
-export function TradingPanel() {
+interface TradingPanelProps {
+  userBalance: string | null; 
+  onBalanceChange: (id: string) => void;
+  selectedTeam: 'barca' | 'madrid';
+}
+
+export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: TradingPanelProps) {
   const [depositAmount, setDepositAmount] = useState('');
   const [side, setSide] = useState<'buy' | 'sell'>('buy');
   const [price, setPrice] = useState('');
   const [quantity, setQuantity] = useState('');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const [userBalance, setUserBalance] = useState<string | null>(null);
   
   const { mutate: signAndExecute } = useSignAndExecuteTransaction();
   const suiClient = useSuiClient();
@@ -131,7 +136,7 @@ export function TradingPanel() {
               const extractedBalance = await extractUserBalanceFromDigest(result.digest);
               
               if (extractedBalance) {
-                setUserBalance(extractedBalance);
+                onBalanceChange(extractedBalance);
                 setMessage({
                   type: 'success',
                   text: `✅ Deposited ${depositAmount} OCT! UserBalance: ${extractedBalance.slice(0, 10)}...`,
@@ -189,8 +194,19 @@ export function TradingPanel() {
     setMessage(null);
 
     try {
-      const priceMist = Math.floor(parseFloat(price) * 1e9);
+      const priceInCents = Math.floor(parseFloat(price) * 100);
       const qty = Math.floor(parseFloat(quantity));
+      
+      console.log('📝 Placing order with:', {
+        orderbook: CONTRACTS.ORDERBOOK_ID,
+        market: CONTRACTS.MARKET_ID,
+        userBalance,
+        option: 0,
+        price: priceInCents,
+        quantity: qty,
+        isBid: side === 'buy',
+      });
+
       const tx = new Transaction();
 
       tx.moveCall({
@@ -200,17 +216,28 @@ export function TradingPanel() {
           tx.object(CONTRACTS.ORDERBOOK_ID),
           tx.object(CONTRACTS.MARKET_ID),
           tx.object(userBalance),
-          tx.pure.u8(0),
-          tx.pure.u64(priceMist),
+          tx.pure.u8(selectedTeam === 'barca' ? 0 : 1),
+          tx.pure.u64(priceInCents),
           tx.pure.u64(qty),
           tx.pure.bool(side === 'buy'),
         ],
+      });
+
+      console.log('📝 Placing order with:', {
+        orderbook: CONTRACTS.ORDERBOOK_ID,
+        market: CONTRACTS.MARKET_ID,
+        userBalance,
+        option: selectedTeam === 'barca' ? 0 : 1,  // ← UPDATE THIS TOO
+        price: priceInCents,
+        quantity: qty,
+        isBid: side === 'buy',
       });
 
       signAndExecute(
         { transaction: tx },
         {
           onSuccess: (result: TxResult) => {
+            console.log('✅ Order placed successfully:', result);
             setMessage({
               type: 'success',
               text: `Order placed! TX: ${result.digest?.slice(0, 10)}...`,
@@ -219,22 +246,44 @@ export function TradingPanel() {
             setQuantity('');
             setLoading(false);
           },
-          onError: (error: Error) => {
-            console.error('Order error:', error);
+          onError: (error: Error | unknown) => {
+            console.error('❌ Order error (full):', error);
+            console.error('Error type:', typeof error);
+            console.error('Error keys:', error && typeof error === 'object' ? Object.keys(error as Record<string, unknown>) : 'null');
+            if (error && typeof error === 'object') {
+              console.error('Error.code:', (error as Record<string, unknown>)?.code);
+              console.error('Error.message:', (error as Record<string, unknown>)?.message);
+            }
+            console.error('Full error JSON:', JSON.stringify(error, null, 2));
+            
+            let errorMsg = 'Failed to place order';
+            if (error instanceof Error) {
+              errorMsg = error.message;
+            } else if (typeof error === 'string') {
+              errorMsg = error;
+            } else if (error && typeof error === 'object') {
+              const errObj = error as Record<string, unknown>;
+              if (errObj.message) {
+                errorMsg = String(errObj.message);
+              } else if (errObj.code) {
+                errorMsg = `Error code: ${errObj.code}`;
+              }
+            }
+            
             setMessage({
               type: 'error',
-              text: error instanceof Error ? error.message : 'Failed to place order',
+              text: errorMsg || 'Transaction failed. Check console for details.',
             });
             setLoading(false);
           },
         }
       );
     } catch (err) {
-      console.error('Order exception:', err);
-      const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+      console.error('❌ Order exception (full):', err);
+      const errorMsg = err instanceof Error ? err.message : String(err);
       setMessage({
         type: 'error',
-        text: errorMsg,
+        text: errorMsg || 'Unknown error',
       });
       setLoading(false);
     }
@@ -272,11 +321,11 @@ export function TradingPanel() {
           type="text"
           placeholder="0x..."
           value={userBalance || ''}
-          onChange={(e) => setUserBalance(e.target.value)}
-          className="w-full rounded-lg border border-gray-600 bg-gray-800 px-4 py-2 text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none text-xs"
+          readOnly
+          className="w-full rounded-lg border border-gray-600 bg-gray-800 px-4 py-2 text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none text-xs opacity-75"
         />
         <p className="mt-1 text-xs text-gray-500">
-          {userBalance ? '✓ Set automatically' : 'Auto-extracted after deposit (or paste manually)'}
+          {userBalance ? '✓ Set automatically' : 'Auto-extracted after deposit'}
         </p>
       </div>
 
@@ -361,7 +410,7 @@ export function TradingPanel() {
             : 'bg-red-500 hover:bg-red-600 disabled:bg-gray-600'
         } text-white disabled:text-gray-400 disabled:cursor-not-allowed transition-all`}
       >
-        {loading ? 'Processing...' : `${side === 'buy' ? 'Buy' : 'Sell'} ${quantity || '0'} @ ${price || '0.00'} OCT`}
+        {loading ? 'Processing...' : `${side === 'buy' ? 'Buy' : 'Sell'} ${quantity || '0'} ${selectedTeam === 'barca' ? 'Barca' : 'Madrid'} @ ${price || '0.00'} OCT`}
       </button>
     </div>
   );

@@ -2,7 +2,7 @@
 
 [move]
 version = 3
-manifest_digest = "D208CD220EEF763B6ED66313BCEB36CCD387B83712DC7FE03568CF7B63018818"
+manifest_digest = "45399963649F0291CDEE34DA313CF4C19F5C3AD88FF4107BDA0D6963640FF777"
 deps_digest = "F8BBB0CCB2491CA29A3DF03D6F92277A4F3574266507ACD77214D37ECA3F3082"
 dependencies = [
   { id = "One", name = "One" },
@@ -27,14 +27,8 @@ flavor = "one"
 
 [env]
 
-[env.devnet]
-chain-id = "a4bc10c3"
-original-published-id = "0x85e477bdc976e6303dc3e08067a7dd06a8c6a20012247d265336949244d5eb83"
-latest-published-id = "0x85e477bdc976e6303dc3e08067a7dd06a8c6a20012247d265336949244d5eb83"
-published-version = "1"
-
 [env.onechain-testnet]
 chain-id = "1bd5c965"
-original-published-id = "0xe701e47e7f517f11840529facb5cf22e01115bdbf115b79cb9ce00d7dd6e3477"
-latest-published-id = "0xe701e47e7f517f11840529facb5cf22e01115bdbf115b79cb9ce00d7dd6e3477"
+original-published-id = "0xa0d96944ae558975549e82d64f50b42ff8d850f99da7c24d5b5200d72f3a2377"
+latest-published-id = "0xa0d96944ae558975549e82d64f50b42ff8d850f99da7c24d5b5200d72f3a2377"
 published-version = "1"

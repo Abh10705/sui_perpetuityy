@@ -16,7 +16,8 @@ export function MatchingDebug() {
           <h4 className="font-bold text-green-400 mb-2">Bid Orders (Buyers):</h4>
           {orderbook.bids.map(bid => (
             <div key={bid.order_id} className="text-sm text-gray-300">
-              ID {bid.order_id}: Price ${(bid.price / 1e9).toFixed(6)} | 
+              ID {bid.order_id}: Price ${bid.price.toFixed(2)} |
+
               Qty: {bid.quantity} | Filled: {bid.filled_quantity} | 
               <span className={bid.filled_quantity > 0 ? 'text-yellow-400' : 'text-gray-500'}>
                 {bid.filled_quantity > 0 ? ' ✅ MATCHED' : ' ⏳ OPEN'}
@@ -29,7 +30,8 @@ export function MatchingDebug() {
           <h4 className="font-bold text-red-400 mb-2">Ask Orders (Sellers):</h4>
           {orderbook.asks.map(ask => (
             <div key={ask.order_id} className="text-sm text-gray-300">
-              ID {ask.order_id}: Price ${(ask.price / 1e9).toFixed(6)} | 
+              ID {ask.order_id}: Price ${ask.price.toFixed(2)} |
+
               Qty: {ask.quantity} | Filled: {ask.filled_quantity} | 
               <span className={ask.filled_quantity > 0 ? 'text-yellow-400' : 'text-gray-500'}>
                 {ask.filled_quantity > 0 ? ' ✅ MATCHED' : ' ⏳ OPEN'}

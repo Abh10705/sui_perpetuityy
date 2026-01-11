@@ -1,12 +1,15 @@
 'use client';
 
-import { use } from 'react';
+import { use, useState } from 'react';
 import { OrderBook } from '@/components/OrderBook';
 import { TradingPanel } from '@/components/TradingPanel';
+import { UserPosition } from '@/components/UserPosition';
 import { MatchingDebug } from '@/components/MatchingDebug';
 
 export default function MarketPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  const [userBalance, setUserBalance] = useState<string | null>(null);
+  const [selectedTeam, setSelectedTeam] = useState<'barca' | 'madrid'>('barca');
 
   return (
     <div className="min-h-screen bg-black">
@@ -19,9 +22,29 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
               <p className="mt-2 text-gray-400">Market ID: {id}</p>
             </div>
             <div className="flex gap-3">
-              <button className="px-4 py-2 border border-gray-600 bg-gray-800 text-white rounded-lg hover:border-gray-500">Barca</button>
-              <button className="px-4 py-2 border border-gray-600 bg-gray-800 text-white rounded-lg hover:border-gray-500">Madrid</button>
+              <button 
+                onClick={() => setSelectedTeam('barca')}
+                className={`px-4 py-2 rounded-lg transition-all ${
+                  selectedTeam === 'barca'
+                    ? 'border-2 border-blue-500 bg-blue-500/10 text-blue-400'
+                    : 'border border-gray-600 bg-gray-800 text-white hover:border-gray-500'
+                }`}
+              >
+                Barca
+              </button>
+              <button 
+                onClick={() => setSelectedTeam('madrid')}
+                className={`px-4 py-2 rounded-lg transition-all ${
+                  selectedTeam === 'madrid'
+                    ? 'border-2 border-white bg-white/10 text-white'
+                    : 'border border-gray-600 bg-gray-800 text-white hover:border-gray-500'
+                }`}
+              >
+                Madrid
+              </button>
             </div>
+
+            
           </div>
         </div>
       </div>
@@ -34,9 +57,16 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
             <OrderBook />
           </div>
 
-          {/* Trading Panel - 1 column */}
-          <div>
-            <TradingPanel />
+          {/* Trading Panel + User Position - 1 column */}
+          <div className="space-y-4">
+            
+            <TradingPanel 
+              userBalance={userBalance} 
+              onBalanceChange={setUserBalance}
+              selectedTeam={selectedTeam}
+            />
+
+            <UserPosition userBalanceId={userBalance} />
           </div>
         </div>
 

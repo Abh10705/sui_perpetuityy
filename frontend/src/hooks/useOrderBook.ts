@@ -106,7 +106,11 @@ export function useOrderBook() {
 
             if (!isBid && !isAsk) continue;
 
-            const price = parseInt(orderFields.price || '0');
+            
+            const price = parseInt(orderFields.price || '0')/ 100;
+            console.log(`Price value: ${price}, Formatted: ${price.toFixed(6)}`);
+
+
             const quantity = parseInt(orderFields.quantity || '0');
             const filled_quantity = parseInt(orderFields.filled_quantity || '0');
 
@@ -121,9 +125,8 @@ export function useOrderBook() {
               is_bid: orderFields.is_bid,
             };
 
-            console.log(
-              `✅ Order ${orderId}: price=${price}, qty=${quantity}, filled=${filled_quantity}, is_bid=${orderFields.is_bid}`
-            );
+            console.log(`✅ Order ${orderId}: price=$${price.toFixed(2)}, qty=${quantity}, option=${orderFields.option?.variant}, is_bid=${orderFields.is_bid}`);
+              
 
             if (isBid) {
               bidsData.push(order);
@@ -140,6 +143,12 @@ export function useOrderBook() {
 
       bidsData.sort((a, b) => b.price - a.price);
       asksData.sort((a, b) => a.price - b.price);
+      // Separate by team (option)
+      const barcaBids = bidsData.filter(bid => bid.option === 'OptionA');
+      const barcaAsks = asksData.filter(ask => ask.option === 'OptionA');
+      const madridBids = bidsData.filter(bid => bid.option === 'OptionB');
+      const madridAsks = asksData.filter(ask => ask.option === 'OptionB');
+
 
       setOrderbook({
         topBid: topBid || 0,
@@ -148,6 +157,10 @@ export function useOrderBook() {
         askDepth: ask_ids.length,
         bids: bidsData,
         asks: asksData,
+        barcaBids,
+        barcaAsks,
+        madridBids,
+        madridAsks,
       });
 
       console.log('📈 Final OrderBook:', { 

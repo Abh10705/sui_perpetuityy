@@ -16,7 +16,13 @@ export interface OrderBookData {
   askDepth: number;
   bids: Order[];
   asks: Order[];
+  // New fields for separated Barca/Madrid
+  barcaBids: Order[];
+  barcaAsks: Order[];
+  madridBids: Order[];
+  madridAsks: Order[];
 }
+
 
 export interface UserBalance {
   id: string;
@@ -24,3 +30,12 @@ export interface UserBalance {
   trader: string;
   balance: number;
 }
+
+export interface UserPosition {
+  barcarShares: number;
+  madridShares: number;
+  balance: number;
+  loading: boolean;
+  error: string | null;
+}
+
