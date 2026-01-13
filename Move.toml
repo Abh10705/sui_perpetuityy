@@ -6,7 +6,7 @@ edition = "2024.beta"
 One = { git = "https://github.com/one-chain-labs/onechain.git", subdir = "crates/sui-framework/packages/one-framework", rev = "main" }
 
 [addresses]
-perpetuity_sui = "0xa0d96944ae558975549e82d64f50b42ff8d850f99da7c24d5b5200d72f3a2377"
+perpetuity_sui = "0xdd6790e97dfbd73feee49aad98200ad9536b9f35e61b48b0009a64e81682e14e"
 
 [dev-dependencies]
 

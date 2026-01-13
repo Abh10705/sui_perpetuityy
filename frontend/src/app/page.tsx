@@ -44,7 +44,7 @@ export default function HomePage() {
             Trade Your Beliefs
           </h2>
           <p className="text-xl text-neutral-400 max-w-2xl mx-auto">
-            The world&apos;s first perpetual market on Sui.
+            The world&apos;s first perpetual market on One Chain.
           </p>
         </div>
 

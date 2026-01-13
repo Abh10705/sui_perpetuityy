@@ -107,7 +107,7 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
         target: `${CONTRACTS.PACKAGE_ID}::orderbook::deposit_funds`,
         typeArguments: ['0x2::oct::OCT'],
         arguments: [
-          tx.pure.u64(1),
+          tx.object(CONTRACTS.MARKET_ID),
           coin,
         ],
       });
