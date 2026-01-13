@@ -104,7 +104,7 @@ export default function HomePage() {
           <a href="#" className="hover:text-white">Twitter</a>
           <a href="#" className="hover:text-white">Discord</a>
         </div>
-        © 2024 Perpetuity.
+        © 2025 Perpetuity.
       </footer>
     </main>
   );

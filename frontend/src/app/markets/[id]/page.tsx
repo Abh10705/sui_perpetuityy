@@ -1,10 +1,17 @@
 'use client';
 
+import dynamic from 'next/dynamic';
 import { use, useState } from 'react';
 import { OrderBook } from '@/components/OrderBook';
 import { TradingPanel } from '@/components/TradingPanel';
 import { UserPosition } from '@/components/UserPosition';
 import { MatchingDebug } from '@/components/MatchingDebug';
+
+// Dynamically import ConnectButton to avoid hydration mismatch
+const ConnectButton = dynamic(
+  () => import('@mysten/dapp-kit').then(mod => ({ default: mod.ConnectButton })),
+  { ssr: false }
+);
 
 export default function MarketPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -16,35 +23,35 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
       {/* Header */}
       <div className="border-b border-gray-700 bg-gray-900 py-8">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex flex-col items-start justify-between gap-4 md:flex-row md:items-center">
+          <div className="flex flex-col items-start justify-between gap-4 md:flex-row md:items-center mb-6">
             <div>
               <h1 className="text-4xl font-bold text-white">Which team is better? Barca or Madrid</h1>
               <p className="mt-2 text-gray-400">Market ID: {id}</p>
             </div>
-            <div className="flex gap-3">
-              <button 
-                onClick={() => setSelectedTeam('barca')}
-                className={`px-4 py-2 rounded-lg transition-all ${
-                  selectedTeam === 'barca'
-                    ? 'border-2 border-blue-500 bg-blue-500/10 text-blue-400'
-                    : 'border border-gray-600 bg-gray-800 text-white hover:border-gray-500'
-                }`}
-              >
-                Barca
-              </button>
-              <button 
-                onClick={() => setSelectedTeam('madrid')}
-                className={`px-4 py-2 rounded-lg transition-all ${
-                  selectedTeam === 'madrid'
-                    ? 'border-2 border-white bg-white/10 text-white'
-                    : 'border border-gray-600 bg-gray-800 text-white hover:border-gray-500'
-                }`}
-              >
-                Madrid
-              </button>
-            </div>
+            <ConnectButton />
+          </div>
 
-            
+          <div className="flex gap-3">
+            <button 
+              onClick={() => setSelectedTeam('barca')}
+              className={`px-4 py-2 rounded-lg transition-all ${
+                selectedTeam === 'barca'
+                  ? 'border-2 border-blue-500 bg-blue-500/10 text-blue-400'
+                  : 'border border-gray-600 bg-gray-800 text-white hover:border-gray-500'
+              }`}
+            >
+              Barca
+            </button>
+            <button 
+              onClick={() => setSelectedTeam('madrid')}
+              className={`px-4 py-2 rounded-lg transition-all ${
+                selectedTeam === 'madrid'
+                  ? 'border-2 border-white bg-white/10 text-white'
+                  : 'border border-gray-600 bg-gray-800 text-white hover:border-gray-500'
+              }`}
+            >
+              Madrid
+            </button>
           </div>
         </div>
       </div>
@@ -59,7 +66,6 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
 
           {/* Trading Panel + User Position - 1 column */}
           <div className="space-y-4">
-            
             <TradingPanel 
               userBalance={userBalance} 
               onBalanceChange={setUserBalance}
