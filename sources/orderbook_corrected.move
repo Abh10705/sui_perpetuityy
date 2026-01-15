@@ -424,7 +424,8 @@ module perpetuity_sui::orderbook {
                         };
                     }
                 } else {
-                    break
+                    ask_index = ask_index + 1;
+                    continue
                 };
 
                 ask_index = ask_index + 1;
@@ -510,7 +511,8 @@ module perpetuity_sui::orderbook {
                         };
                     }
                 } else {
-                    break
+                    bid_index = bid_index + 1;
+                    continue
                 };
 
                 bid_index = bid_index + 1;
