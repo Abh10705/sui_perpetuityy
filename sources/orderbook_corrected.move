@@ -545,7 +545,7 @@ module perpetuity_sui::orderbook {
                     let ask_price = ask_order.price;
                     let ask_option = ask_order.option;
 
-                    if (ask_option == complementary_option && ask_price == complementary_price) {
+                    if (ask_option == complementary_option && ask_price <= complementary_price) {
                         let new_order_remaining_now = {
                             let order = table::borrow(&orderbook.orders, new_order_id);
                             order.quantity - order.filled_quantity
@@ -625,7 +625,7 @@ module perpetuity_sui::orderbook {
                     let bid_price = bid_order.price;
                     let bid_option = bid_order.option;
 
-                    if (bid_option == complementary_option && bid_price == complementary_price) {
+                    if (bid_option == complementary_option && bid_price >= complementary_price) {
                         let new_order_remaining_now = {
                             let order = table::borrow(&orderbook.orders, new_order_id);
                             order.quantity - order.filled_quantity

@@ -29,6 +29,6 @@ flavor = "one"
 
 [env.onechain-testnet]
 chain-id = "1bd5c965"
-original-published-id = "0x735ef90260d63f0a310eb0e6df51e142a836f7bad48fbb56777748e6bae6c43e"
-latest-published-id = "0x735ef90260d63f0a310eb0e6df51e142a836f7bad48fbb56777748e6bae6c43e"
+original-published-id = "0x793eb38194aaaa3164c2c69264a3f0052dab7f7eec43c04ba61f7035173cfe0f"
+latest-published-id = "0x793eb38194aaaa3164c2c69264a3f0052dab7f7eec43c04ba61f7035173cfe0f"
 published-version = "1"
