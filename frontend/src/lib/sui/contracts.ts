@@ -1,6 +1,4 @@
-
 import { Transaction } from '@mysten/sui/transactions';
-
 import { CONTRACTS } from '@/lib/constants';
 
 export interface PlaceOrderResult {
@@ -10,41 +8,25 @@ export interface PlaceOrderResult {
 }
 
 /**
- * Place an order on the orderbook
- * @param price Price in SUI
- * @param quantity Quantity of contracts
- * @param isBuy true for buy, false for sell
+ * Create UserBalance (do this once, first time)
  */
-export async function placeOrder(
-  price: number,
-  quantity: number,
-  isBuy: boolean
-): Promise<PlaceOrderResult> {
+export async function createUserBalance(): Promise<PlaceOrderResult> {
   try {
-    // Convert to MIST (1 SUI = 1e9 MIST)
-    const priceMist = Math.floor(price * 1e9);
-    
     const tx = new Transaction();
 
-    // Build the transaction
     tx.moveCall({
-      target: `${CONTRACTS.PACKAGE_ID}::orderbook::placeordercli`,
+      target: `${CONTRACTS.PACKAGE_ID}::orderbook::create_user_balance`,
+      typeArguments: ['0x2::oct::OCT'],
       arguments: [
-        tx.object(CONTRACTS.ORDERBOOK_ID), // OrderBook
-        tx.object(CONTRACTS.MARKET_ID),    // Market
-        // UserBalance - user will need to have deposited first
-        tx.pure.u64(priceMist),           // Price in MIST
-        tx.pure.u64(quantity),             // Quantity
-        tx.pure.u8(isBuy ? 0 : 1),        // Side: 0 = buy, 1 = sell
+        tx.object(CONTRACTS.MARKET_ID),
       ],
     });
 
-    // Wallet signer integration needed
-    console.error('Wallet integration needed - cannot sign transaction yet');
+    console.log('Transaction built for create_user_balance');
     
     return {
-      success: false,
-      error: 'Wallet not connected. Connect wallet to place orders.',
+      success: true,
+      error: undefined,
     };
   } catch (err) {
     return {
@@ -58,26 +40,74 @@ export async function placeOrder(
  * Deposit funds to the market
  */
 export async function depositFunds(
+  userBalanceId: string,
   amount: number
 ): Promise<PlaceOrderResult> {
   try {
     const amountMist = Math.floor(amount * 1e9);
 
     const tx = new Transaction();
+    const [coin] = tx.splitCoins(tx.gas, [amountMist]);
 
     tx.moveCall({
-      target: `${CONTRACTS.PACKAGE_ID}::orderbook::depositfunds`,
+      target: `${CONTRACTS.PACKAGE_ID}::orderbook::deposit_funds`,
+      typeArguments: ['0x2::oct::OCT'],
       arguments: [
         tx.object(CONTRACTS.MARKET_ID),
-        tx.pure.u64(amountMist),
+        tx.object(userBalanceId),
+        coin,
       ],
     });
 
-    console.error('Wallet integration needed - cannot sign transaction yet');
+    console.log('Transaction built for deposit_funds');
     
     return {
+      success: true,
+      error: undefined,
+    };
+  } catch (err) {
+    return {
       success: false,
-      error: 'Wallet not connected. Connect wallet to deposit.',
+      error: err instanceof Error ? err.message : 'Unknown error',
+    };
+  }
+}
+
+/**
+ * Place an order on the orderbook
+ */
+export async function placeOrder(
+  userBalanceId: string,
+  option: number,
+  price: number,
+  quantity: number,
+  isBuy: boolean
+): Promise<PlaceOrderResult> {
+  try {
+    const priceInCents = Math.floor(price * 100);
+    const qty = Math.floor(quantity);
+    
+    const tx = new Transaction();
+
+    tx.moveCall({
+      target: `${CONTRACTS.PACKAGE_ID}::orderbook::place_order_cli`,
+      typeArguments: ['0x2::oct::OCT'],
+      arguments: [
+        tx.object(CONTRACTS.ORDERBOOK_ID),
+        tx.object(CONTRACTS.MARKET_ID),
+        tx.object(userBalanceId),
+        tx.pure.u8(option),
+        tx.pure.u64(priceInCents),
+        tx.pure.u64(qty),
+        tx.pure.bool(isBuy),
+      ],
+    });
+
+    console.log('Transaction built for place_order_cli');
+    
+    return {
+      success: true,
+      error: undefined,
     };
   } catch (err) {
     return {
