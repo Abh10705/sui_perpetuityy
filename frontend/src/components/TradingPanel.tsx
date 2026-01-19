@@ -3,12 +3,14 @@
 import { useState, useEffect } from 'react';
 import { useSignAndExecuteTransaction, useCurrentAccount } from '@mysten/dapp-kit';
 import { Transaction } from '@mysten/sui/transactions';
+import { Inputs } from '@mysten/sui/transactions';
 import { useSuiClient } from '@mysten/dapp-kit';
 import { SuiObjectChange } from '@mysten/sui/client';
 import { CONTRACTS } from '@/lib/constants';
 
 interface TxResult {
   digest?: string;
+  objectChanges?: SuiObjectChange[];
 }
 
 interface TradingPanelProps {
@@ -43,7 +45,6 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
         return;
       }
 
-      // Check if we already have it in state
       if (userBalance) {
         return;
       }
@@ -51,11 +52,10 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
       setIsCheckingExisting(true);
 
       try {
-        // Get all objects owned by the wallet
         const ownedObjects = await suiClient.getOwnedObjects({
           owner: currentAccount.address,
           filter: {
-            StructType: `${CONTRACTS.PACKAGE_ID}::orderbook::UserBalance<0x2::oct::OCT>`
+            StructType: `${CONTRACTS.PACKAGE_ID}::outcome::UserBalance<0x2::oct::OCT>`
           },
           options: {
             showContent: true,
@@ -67,7 +67,6 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
           const userBalanceId = ownedObjects.data[0].data?.objectId;
           
           if (userBalanceId) {
-            // Save to localStorage and state
             localStorage.setItem(`userBalance_${currentAccount.address}`, userBalanceId);
             onBalanceChange(userBalanceId);
             
@@ -149,32 +148,44 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
     try {
       const tx = new Transaction();
 
-      const targetFunction = `${CONTRACTS.PACKAGE_ID}::orderbook::create_user_balance`;
-
-      // ✅ FIXED: Contract handles transfer internally now!
       tx.moveCall({
-        target: targetFunction,
+        target: `${CONTRACTS.PACKAGE_ID}::outcome::create_user_balance`,
         typeArguments: ['0x2::oct::OCT'],
         arguments: [
-          tx.object(CONTRACTS.MARKET_ID),
+          tx.object(
+            Inputs.SharedObjectRef({
+              objectId: CONTRACTS.MARKET_ID,
+              initialSharedVersion: 21541,
+              mutable: false,
+            })
+          ),
+          tx.pure.u64(1),
         ],
       });
       
-      // Set gas budget to prevent endpoint failures
-      tx.setGasBudget(1000000000); // 1 SUI
+      tx.setGasBudget(1000000000);
 
-      let timeoutId: NodeJS.Timeout;
-      const timeoutPromise = new Promise<void>((_, reject) => {
-        timeoutId = setTimeout(() => {
-          reject(new Error('Wallet did not respond within 60 seconds'));
-        }, 60000);
-      });
+      let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+      const clearTimeoutSafely = () => {
+        if (timeoutId !== null) {
+          clearTimeout(timeoutId);
+        }
+      };
+
+      timeoutId = setTimeout(() => {
+        setMessage({
+          type: 'error',
+          text: 'Wallet did not respond within 60 seconds',
+        });
+        setLoading(false);
+      }, 60000);
 
       signAndExecute(
         { transaction: tx },
         {
           onSuccess: async (result: TxResult) => {
-            clearTimeout(timeoutId);
+            clearTimeoutSafely();
             
             if (!result.digest) {
               setMessage({
@@ -194,7 +205,6 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
               const extractedBalance = await extractUserBalanceFromDigest(result.digest);
               
               if (extractedBalance) {
-                // ✅ SAVE TO LOCALSTORAGE WITH WALLET ADDRESS KEY
                 localStorage.setItem(`userBalance_${currentAccount.address}`, extractedBalance);
                 
                 onBalanceChange(extractedBalance);
@@ -218,16 +228,14 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
             setLoading(false);
           },
           onError: (error: ErrorWithCode) => {
-            clearTimeout(timeoutId);
+            clearTimeoutSafely();
             
-            // ✅ IMPROVED: Check if account already exists
             if (error.message.includes('EUnauthorized') || error.message.includes('already')) {
               setMessage({
                 type: 'error',
                 text: 'Account already exists. Refreshing page to load it...',
               });
               
-              // Reload after 2 seconds to trigger the auto-detect
               setTimeout(() => {
                 window.location.reload();
               }, 2000);
@@ -242,6 +250,7 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
           },
         }
       );
+
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Unknown error';
       setMessage({
@@ -252,7 +261,7 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
     }
   };
 
-  // ✅ Step 1 - Deposit
+  // ✅ Step 1 - Deposit (WITH ENHANCED DEBUGGING)
   const handleDeposit = async () => {
     if (!userBalance) {
       setMessage({ type: 'error', text: 'Please create account first (Step 0)' });
@@ -268,38 +277,91 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
     setMessage(null);
 
     try {
+      console.log('🔍 DEBUG: Starting deposit process...');
+      console.log('🔍 UserBalance ID:', userBalance);
+      console.log('🔍 Deposit Amount:', depositAmount);
+
+      // ✅ Fetch OCT coins with detailed info
+      const octCoins = await suiClient.getOwnedObjects({
+        owner: currentAccount!.address!,
+        filter: {
+          StructType: '0x2::coin::Coin<0x2::oct::OCT>',
+        },
+        options: {
+          showContent: true,
+          showType: true,
+        }
+      });
+
+      console.log('🔍 Found OCT coins:', octCoins.data.length);
+      
+      if (octCoins.data.length === 0) {
+        setMessage({ type: 'error', text: 'No OCT coins found in wallet. Get some OCT first!' });
+        setLoading(false);
+        return;
+      }
+
+      // Log all OCT coins with their balances
+      octCoins.data.forEach((coin, index) => {
+        const content = coin.data?.content;
+        if (content && 'fields' in content) {
+          const balance = (content.fields as any).balance;
+          console.log(`🔍 OCT Coin ${index}:`, coin.data?.objectId, 'Balance:', balance);
+        }
+      });
+
+      const octCoinId = octCoins.data[0].data?.objectId;
+      if (!octCoinId) {
+        setMessage({ type: 'error', text: 'Could not get OCT coin ID' });
+        setLoading(false);
+        return;
+      }
+
+      console.log('🔍 Using OCT Coin:', octCoinId);
+
       const amountMist = Math.floor(parseFloat(depositAmount) * 1e9);
+      console.log('🔍 Amount in MIST:', amountMist);
 
       const tx = new Transaction();
       
-      const [coin] = tx.splitCoins(tx.gas, [amountMist]);
-
-      const targetFunction = `${CONTRACTS.PACKAGE_ID}::orderbook::deposit_funds`;
+      // Split from OCT coin
+      const [coin] = tx.splitCoins(tx.object(octCoinId), [amountMist]);
 
       tx.moveCall({
-        target: targetFunction,
+        target: `${CONTRACTS.PACKAGE_ID}::outcome::deposit_funds`,
         typeArguments: ['0x2::oct::OCT'],
         arguments: [
-          tx.object(CONTRACTS.MARKET_ID),
-          tx.object(userBalance),
-          coin,
+          tx.object(userBalance),  // OWNED object
+          coin,                     // Split coin
         ],
       });
 
-      tx.setGasBudget(1000000000); // 1 SUI
+      tx.setGasBudget(1000000000);
 
-      let timeoutId: NodeJS.Timeout;
-      const timeoutPromise = new Promise<void>((_, reject) => {
-        timeoutId = setTimeout(() => {
-          reject(new Error('Wallet did not respond within 60 seconds'));
-        }, 60000);
-      });
+      console.log('🔍 Transaction built, sending to wallet...');
+
+      let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+      const clearTimeoutSafely = () => {
+        if (timeoutId !== null) {
+          clearTimeout(timeoutId);
+        }
+      };
+
+      timeoutId = setTimeout(() => {
+        setMessage({
+          type: 'error',
+          text: 'Wallet did not respond within 60 seconds',
+        });
+        setLoading(false);
+      }, 60000);
 
       signAndExecute(
         { transaction: tx },
         {
           onSuccess: (result: TxResult) => {
-            clearTimeout(timeoutId);
+            clearTimeoutSafely();
+            console.log('✅ Transaction successful!', result.digest);
             
             setMessage({
               type: 'success',
@@ -309,17 +371,22 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
             setLoading(false);
           },
           onError: (error: ErrorWithCode) => {
-            clearTimeout(timeoutId);
+            clearTimeoutSafely();
+            console.error('❌ Transaction failed:', error);
+            console.error('❌ Error message:', error.message);
+            console.error('❌ Error stack:', error.stack);
             
             setMessage({
               type: 'error',
-              text: error instanceof Error ? error.message : 'Failed to deposit',
+              text: `Failed: ${error.message || 'Unknown error'}`,
             });
             setLoading(false);
           },
         }
       );
+
     } catch (err) {
+      console.error('❌ Catch block error:', err);
       const errorMsg = err instanceof Error ? err.message : 'Unknown error';
       setMessage({
         type: 'error',
@@ -329,6 +396,7 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
     }
   };
 
+  // ✅ Step 2 - Place Order
   const handlePlaceOrder = async () => {
     if (!userBalance) {
       setMessage({ type: 'error', text: 'Please deposit funds first' });
@@ -353,8 +421,20 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
         target: `${CONTRACTS.PACKAGE_ID}::orderbook::place_order_cli`,
         typeArguments: ['0x2::oct::OCT'],
         arguments: [
-          tx.object(CONTRACTS.ORDERBOOK_ID),
-          tx.object(CONTRACTS.MARKET_ID),
+          tx.object(
+            Inputs.SharedObjectRef({
+              objectId: CONTRACTS.ORDERBOOK_ID,
+              initialSharedVersion: 21542,
+              mutable: true,
+            })
+          ),
+          tx.object(
+            Inputs.SharedObjectRef({
+              objectId: CONTRACTS.MARKET_ID,
+              initialSharedVersion: 21541,
+              mutable: true,
+            })
+          ),
           tx.object(userBalance),
           tx.pure.u8(selectedTeam === 'barca' ? 0 : 1),
           tx.pure.u64(priceInCents),
@@ -429,7 +509,6 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
         )}
       </div>
 
-      {/* ✅ Loading indicator while checking for existing account */}
       {isCheckingExisting && (
         <div className="mb-6 rounded-lg bg-blue-900/20 border border-blue-700 p-4">
           <p className="text-sm text-blue-300 flex items-center gap-2">
@@ -439,7 +518,6 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
         </div>
       )}
 
-      {/* Step 0 - Create Account */}
       {!userBalance && !isCheckingExisting && (
         <div className="mb-6 rounded-lg bg-blue-900/20 border border-blue-700 p-4">
           <h4 className="mb-3 text-sm font-semibold text-blue-300">Step 0: Initialize Account</h4>
@@ -454,7 +532,6 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
         </div>
       )}
 
-      {/* Step 1: Deposit */}
       {userBalance && (
         <div className="mb-6 rounded-lg bg-gray-800 p-4">
           <h4 className="mb-3 text-sm font-semibold text-gray-300">Step 1: Deposit Funds</h4>
