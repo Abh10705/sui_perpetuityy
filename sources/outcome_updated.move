@@ -12,6 +12,7 @@ module perpetuity_sui::outcome {
 
 
 
+
     public struct SharesTransferred has drop, copy {
         from: address,
         to: address,
@@ -19,6 +20,7 @@ module perpetuity_sui::outcome {
         quantity: u64,
         market_id: u64,
     }
+
 
 
 
@@ -32,9 +34,11 @@ module perpetuity_sui::outcome {
 
 
 
+
     // ============================================================================
     // Error Codes
     // ============================================================================
+
 
 
 
@@ -48,9 +52,11 @@ module perpetuity_sui::outcome {
 
 
 
+
     // ============================================================================
     // Struct Definitions
     // ============================================================================
+
 
 
 
@@ -59,6 +65,7 @@ module perpetuity_sui::outcome {
     public struct AdminCap has key {
         id: one::object::UID,
     }
+
 
 
 
@@ -75,6 +82,7 @@ module perpetuity_sui::outcome {
         market_id: u64,
         balance: Balance<CoinType>,
     }
+
 
 
 
@@ -101,9 +109,11 @@ module perpetuity_sui::outcome {
 
 
 
+
     // ============================================================================
     // Admin Functions
     // ============================================================================
+
 
 
 
@@ -122,9 +132,11 @@ module perpetuity_sui::outcome {
 
 
 
+
     // ============================================================================
     // Market Management
     // ============================================================================
+
 
 
 
@@ -152,6 +164,7 @@ module perpetuity_sui::outcome {
         };
         one::transfer::share_object(market);
     }
+
 
 
 
@@ -187,9 +200,11 @@ module perpetuity_sui::outcome {
 
 
 
+
     // ============================================================================
     // Balance Management (Public Helpers)
     // ============================================================================
+
 
 
 
@@ -209,6 +224,7 @@ module perpetuity_sui::outcome {
         
         balance::join(&mut user_balance.balance, coin::into_balance(coin));
     }
+
 
 
 
@@ -236,6 +252,7 @@ module perpetuity_sui::outcome {
 
 
 
+
     /// Get user's balance amount
     /// 
     /// # Arguments
@@ -252,9 +269,47 @@ module perpetuity_sui::outcome {
 
 
 
+
+    // ============================================================================
+    // ✅ NEW: Permission Check Helpers (for orderbook)
+    // ============================================================================
+
+    /// Get the trader address from a UserBalance
+    /// Used by orderbook to verify permission checks
+    /// 
+    /// # Arguments
+    /// - user_balance: User's balance object
+    /// 
+    /// # Returns
+    /// The trader address who owns this balance
+    public fun get_user_balance_trader<CoinType>(
+        user_balance: &UserBalance<CoinType>,
+    ): address {
+        user_balance.trader
+    }
+
+
+    /// Get the market_id from a UserBalance
+    /// Used by orderbook to verify permission checks
+    /// 
+    /// # Arguments
+    /// - user_balance: User's balance object
+    /// 
+    /// # Returns
+    /// The market ID associated with this balance
+    public fun get_user_balance_market_id<CoinType>(
+        user_balance: &UserBalance<CoinType>,
+    ): u64 {
+        user_balance.market_id
+    }
+
+
+
+
     // ============================================================================
     // Share Management (Public Helpers)
     // ============================================================================
+
 
 
 
@@ -281,6 +336,7 @@ module perpetuity_sui::outcome {
 
 
 
+
     /// Get trader's shares in a specific option
     /// 
     /// # Arguments
@@ -302,6 +358,7 @@ module perpetuity_sui::outcome {
         };
         get_user_shares(shares_table, trader)
     }
+
 
 
 
@@ -332,12 +389,14 @@ module perpetuity_sui::outcome {
 
 
 
+
         // Remove from sender
         if (table::contains(shares_table, from)) {
             let sender_shares = table::borrow_mut(shares_table, from);
             assert!(*sender_shares >= quantity, EInsufficientBalance);
             *sender_shares = *sender_shares - quantity;
         };
+
 
 
 
@@ -349,6 +408,7 @@ module perpetuity_sui::outcome {
         } else {
             table::add(shares_table, to, quantity);
         };
+
 
 
 
@@ -365,9 +425,11 @@ module perpetuity_sui::outcome {
 
 
 
+
     // ============================================================================
     // Settlement Pool Management (Public Helpers)
     // ============================================================================
+
 
 
 
@@ -395,6 +457,7 @@ module perpetuity_sui::outcome {
 
 
 
+
     /// Claim settlement funds
     /// Transfers settlement pool balance to user's available balance
     /// 
@@ -413,6 +476,7 @@ module perpetuity_sui::outcome {
 
 
 
+
         if (table::contains(&market.settlement_pool, sender)) {
             let amount = table::remove(&mut market.settlement_pool, sender);
             assert!(amount > 0, ENoSettlementFunds);
@@ -420,8 +484,10 @@ module perpetuity_sui::outcome {
 
 
 
+
             let settlement_funds = balance::split(&mut market.vault, amount);
             balance::join(&mut user_balance.balance, settlement_funds);
+
 
 
 
@@ -433,4 +499,16 @@ module perpetuity_sui::outcome {
             });
         };
     }
+    /// Refund locked collateral from market vault to user balance
+/// Called when an order is cancelled
+    public fun refund_bid_collateral<CoinType>(
+        market: &mut Market<CoinType>,
+        user_balance: &mut UserBalance<CoinType>,
+        refund_amount: u64,
+    ) {
+        let refund_balance = balance::split(&mut market.vault, refund_amount);
+        balance::join(&mut user_balance.balance, refund_balance);
+    }
+
+
 }
