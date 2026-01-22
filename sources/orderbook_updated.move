@@ -1,7 +1,4 @@
-
-
-
-/// OrderBook Module for Perpetuity Sui Prediction Market
+/// OrderBook Module for Perpetuity Prediction Market
 /// 
 /// This module implements the order matching engine and order book management.
 /// It handles:
@@ -11,7 +8,6 @@
 /// - Order queries (top bid/ask, depth)
 ///
 /// The OrderBook module works with the Outcome module for financial state management.
-
 
 module perpetuity_sui::orderbook {
     use one::table::{Self, Table};
@@ -28,13 +24,13 @@ module perpetuity_sui::orderbook {
         get_user_balance_trader,
         get_user_balance_market_id,
         refund_bid_collateral,
+        lock_bid_collateral,        // ⭐ NEW IMPORT
+        settle_trade_immediate,     // ⭐ NEW IMPORT
     };
-
 
     // ============================================================================
     // Events (DEFINED IN THIS MODULE - required for emission)
     // ============================================================================
-
 
     public struct OrderPlaced has drop, copy {
         order_id: u64,
@@ -46,22 +42,19 @@ module perpetuity_sui::orderbook {
         is_bid: bool,
     }
 
-
     public struct OrderCancelled has drop, copy {
         order_id: u64,
         trader: address,
         market_id: u64,
     }
 
-    
-    // ✅ NEW: Event for refunds when bid orders are cancelled
+    /// ✅ NEW: Event for refunds when bid orders are cancelled
     public struct OrderRefunded has drop, copy {
         order_id: u64,
         trader: address,
         market_id: u64,
         refund_amount: u64,
     }
-
 
     public struct AutoMatched has drop, copy {
         buyer_order_id: u64,
@@ -71,7 +64,6 @@ module perpetuity_sui::orderbook {
         market_id: u64,
         option: Option,
     }
-
 
     public struct CrossAssetMatched has drop, copy {
         bid_order_id: u64,
@@ -84,7 +76,6 @@ module perpetuity_sui::orderbook {
         ask_option: Option,
     }
 
-
     public struct TradeSettled has drop, copy {
         buyer_order_id: u64,
         seller_order_id: u64,
@@ -94,11 +85,9 @@ module perpetuity_sui::orderbook {
         option: Option,
     }
 
-
     // ============================================================================
     // Error Codes
     // ============================================================================
-
 
     const EInvalidPrice: u64 = 1;
     const EInvalidQuantity: u64 = 2;
@@ -110,11 +99,9 @@ module perpetuity_sui::orderbook {
     const EInsufficientShares: u64 = 8;
     const EOrderPartiallyFilled: u64 = 10;
 
-
     // ============================================================================
     // Struct Definitions
     // ============================================================================
-
 
     /// Represents a single order in the order book
     /// 
@@ -142,7 +129,6 @@ module perpetuity_sui::orderbook {
         locked_collateral: u64,
     }
 
-
     /// The order book containing all active orders and price levels
     /// 
     /// # Fields
@@ -166,11 +152,9 @@ module perpetuity_sui::orderbook {
         next_order_id: u64,
     }
 
-
     // ============================================================================
     // Internal Helper Functions
     // ============================================================================
-
 
     /// Validate that two prices are complementary (sum to 100)
     /// 
@@ -180,7 +164,6 @@ module perpetuity_sui::orderbook {
     fun validate_complementary_price(price_a: u64, price_b: u64) {
         assert!(price_a + price_b == 100, EInvalidComplementaryPrice);
     }
-
 
     /// Calculate the complementary price
     /// Used for cross-asset matching (prices must sum to 100)
@@ -194,7 +177,6 @@ module perpetuity_sui::orderbook {
         100 - price
     }
 
-
     /// Get the complementary option
     /// 
     /// # Arguments
@@ -206,11 +188,9 @@ module perpetuity_sui::orderbook {
         complement(option)
     }
 
-
     // ============================================================================
     // Market Initialization
     // ============================================================================
-
 
     /// Create a new order book for a market
     /// Called by market admin during market creation
@@ -234,15 +214,12 @@ module perpetuity_sui::orderbook {
             next_order_id: 1,
         };
 
-
         one::transfer::share_object(orderbook);
     }
-
 
     // ============================================================================
     // Order Placement & Matching
     // ============================================================================
-
 
     /// Place a new order and attempt automatic matching
     /// 
@@ -271,7 +248,6 @@ module perpetuity_sui::orderbook {
         assert!(price > 0 && price < 100, EInvalidPrice);
         assert!(quantity > 0, EInvalidQuantity);
 
-
         let sender = one::tx_context::sender(ctx);
 
         // ✅ PERMISSION CHECK #1: Verify UserBalance belongs to sender
@@ -285,11 +261,13 @@ module perpetuity_sui::orderbook {
             let required_collateral = price * quantity;
             let user_balance_amount = get_user_balance(user_balance);
             assert!(user_balance_amount >= required_collateral, EInsufficientFunds);
+            
+            // ⭐ NEW: Lock coins in vault when bid is placed
+            lock_bid_collateral(market, user_balance, required_collateral);
         } else {
             let seller_shares = get_user_position(market, sender, option);
             assert!(seller_shares >= quantity, EInsufficientShares);
         };
-
 
         // Create order
         let locked_amount = if (is_bid) { price * quantity } else { 0 };
@@ -306,11 +284,9 @@ module perpetuity_sui::orderbook {
             locked_collateral: locked_amount,
         };
 
-
         let order_id = orderbook.next_order_id;
         table::add(&mut orderbook.orders, order_id, order);
         table::add(&mut orderbook.active_orders, order_id, true);
-
 
         // Add to price levels
         if (is_bid) {
@@ -329,7 +305,6 @@ module perpetuity_sui::orderbook {
             vector::push_back(ask_level, order_id);
         };
 
-
         one::event::emit(OrderPlaced {
             order_id,
             trader: sender,
@@ -340,11 +315,9 @@ module perpetuity_sui::orderbook {
             is_bid,
         });
 
-
         orderbook.next_order_id = orderbook.next_order_id + 1;
         auto_match_orders(orderbook, market, order_id, is_bid, ctx);
     }
-
 
     /// Place an order using CLI-compatible u8 for option encoding
     /// Convenience wrapper for command-line tools
@@ -381,11 +354,9 @@ module perpetuity_sui::orderbook {
         );
     }
 
-
     // ============================================================================
     // Order Cancellation (HARDENED)
     // ============================================================================
-
 
     /// Cancel an unfilled order
     /// SECURITY: Orders can only be cancelled if they have not been filled at all
@@ -408,22 +379,18 @@ module perpetuity_sui::orderbook {
         let sender = one::tx_context::sender(ctx);
         assert!(table::contains(&orderbook.orders, order_id), EOrderNotFound);
 
-
         let order = table::borrow(&orderbook.orders, order_id);
         assert!(order.trader == sender, EUnauthorized);
         
         // SECURITY: Prevent cancellation of partially filled orders
         assert!(order.filled_quantity == 0, EOrderPartiallyFilled);
 
-
         let is_bid = order.is_bid;
         let price = order.price;
         let locked_collateral = order.locked_collateral;
 
-
         table::remove(&mut orderbook.orders, order_id);
         table::remove(&mut orderbook.active_orders, order_id);
-
 
         // Remove from bid/ask lists and price levels
         if (is_bid) {
@@ -451,7 +418,6 @@ module perpetuity_sui::orderbook {
             };
         };
 
-
         if (!is_bid) {
             let ask_len = vector::length(&orderbook.ask_ids);
             let mut ask_i = 0;
@@ -477,7 +443,6 @@ module perpetuity_sui::orderbook {
             };
         };
 
-
         // ✅ NEW: REFUND LOGIC - If it's a bid order, refund the locked collateral
         if (is_bid && locked_collateral > 0) {
             // Call public refund function from outcome module
@@ -492,7 +457,6 @@ module perpetuity_sui::orderbook {
             });
         };
 
-
         one::event::emit(OrderCancelled {
             order_id,
             trader: sender,
@@ -500,11 +464,9 @@ module perpetuity_sui::orderbook {
         });
     }
 
-
     // ============================================================================
     // Automatic Order Matching
     // ============================================================================
-
 
     /// Core matching engine: attempts to match a new order against existing orders
     /// Handles both same-option and cross-option (complementary) matching
@@ -527,18 +489,15 @@ module perpetuity_sui::orderbook {
             order.price
         };
 
-
         let new_order_option = {
             let order = table::borrow(&orderbook.orders, new_order_id);
             order.option
         };
 
-
         // Phase 1: Match same-option orders
         if (is_bid) {
             let ask_len = vector::length(&orderbook.ask_ids);
             let mut ask_index = 0;
-
 
             while (ask_index < ask_len) {
                 let ask_order_id = *vector::borrow(&orderbook.ask_ids, ask_index);
@@ -548,18 +507,15 @@ module perpetuity_sui::orderbook {
                     continue
                 };
 
-
                 let ask_price = {
                     let order = table::borrow(&orderbook.orders, ask_order_id);
                     order.price
                 };
 
-
                 let ask_option = {
                     let order = table::borrow(&orderbook.orders, ask_order_id);
                     order.option
                 };
-
 
                 if (ask_option == new_order_option && ask_price <= new_order_price) {
                     let new_order_remaining = {
@@ -567,12 +523,10 @@ module perpetuity_sui::orderbook {
                         order.quantity - order.filled_quantity
                     };
 
-
                     let ask_order_remaining = {
                         let order = table::borrow(&orderbook.orders, ask_order_id);
                         order.quantity - order.filled_quantity
                     };
-
 
                     if (new_order_remaining > 0 && ask_order_remaining > 0) {
                         let match_qty = if (new_order_remaining < ask_order_remaining) {
@@ -581,36 +535,31 @@ module perpetuity_sui::orderbook {
                             ask_order_remaining
                         };
 
-
                         {
                             let new_order = table::borrow_mut(&mut orderbook.orders, new_order_id);
                             new_order.filled_quantity = new_order.filled_quantity + match_qty;
                         };
-
 
                         {
                             let ask_order = table::borrow_mut(&mut orderbook.orders, ask_order_id);
                             ask_order.filled_quantity = ask_order.filled_quantity + match_qty;
                         };
 
-
                         let buyer_addr = {
                             let order = table::borrow(&orderbook.orders, new_order_id);
                             order.trader
                         };
-
 
                         let seller_addr = {
                             let order = table::borrow(&orderbook.orders, ask_order_id);
                             order.trader
                         };
 
-
                         transfer_shares(market, seller_addr, buyer_addr, new_order_option, match_qty, ctx);
                         
                         let payment_amount = ask_price * match_qty;
-                        add_to_settlement(market, seller_addr, payment_amount);
-
+                        // ⭐ REPLACED: add_to_settlement → settle_trade_immediate
+                        settle_trade_immediate(market, seller_addr, payment_amount, ctx);
 
                         one::event::emit(AutoMatched {
                             buyer_order_id: new_order_id,
@@ -621,7 +570,6 @@ module perpetuity_sui::orderbook {
                             option: new_order_option,
                         });
 
-
                         let new_remaining = {
                             let order = table::borrow(&orderbook.orders, new_order_id);
                             order.quantity - order.filled_quantity
@@ -636,13 +584,11 @@ module perpetuity_sui::orderbook {
                     continue
                 };
 
-
                 ask_index = ask_index + 1;
             };
         } else {
             let bid_len = vector::length(&orderbook.bid_ids);
             let mut bid_index = 0;
-
 
             while (bid_index < bid_len) {
                 let bid_order_id = *vector::borrow(&orderbook.bid_ids, bid_index);
@@ -652,18 +598,15 @@ module perpetuity_sui::orderbook {
                     continue
                 };
 
-
                 let bid_price = {
                     let order = table::borrow(&orderbook.orders, bid_order_id);
                     order.price
                 };
 
-
                 let bid_option = {
                     let order = table::borrow(&orderbook.orders, bid_order_id);
                     order.option
                 };
-
 
                 if (bid_option == new_order_option && bid_price >= new_order_price) {
                     let new_order_remaining = {
@@ -671,12 +614,10 @@ module perpetuity_sui::orderbook {
                         order.quantity - order.filled_quantity
                     };
 
-
                     let bid_order_remaining = {
                         let order = table::borrow(&orderbook.orders, bid_order_id);
                         order.quantity - order.filled_quantity
                     };
-
 
                     if (new_order_remaining > 0 && bid_order_remaining > 0) {
                         let match_qty = if (new_order_remaining < bid_order_remaining) {
@@ -685,37 +626,31 @@ module perpetuity_sui::orderbook {
                             bid_order_remaining
                         };
 
-
                         {
                             let bid_order = table::borrow_mut(&mut orderbook.orders, bid_order_id);
                             bid_order.filled_quantity = bid_order.filled_quantity + match_qty;
                         };
-
 
                         {
                             let new_order = table::borrow_mut(&mut orderbook.orders, new_order_id);
                             new_order.filled_quantity = new_order.filled_quantity + match_qty;
                         };
 
-
                         let buyer_addr = {
                             let order = table::borrow(&orderbook.orders, bid_order_id);
                             order.trader
                         };
-
 
                         let seller_addr = {
                             let order = table::borrow(&orderbook.orders, new_order_id);
                             order.trader
                         };
 
-
                         transfer_shares(market, seller_addr, buyer_addr, new_order_option, match_qty, ctx);
 
-
                         let payment_amount = bid_price * match_qty;
-                        add_to_settlement(market, buyer_addr, payment_amount);
-
+                        // ⭐ REPLACED: add_to_settlement → settle_trade_immediate
+                        settle_trade_immediate(market, buyer_addr, payment_amount, ctx);
 
                         one::event::emit(AutoMatched {
                             buyer_order_id: bid_order_id,
@@ -725,7 +660,6 @@ module perpetuity_sui::orderbook {
                             market_id: orderbook.market_id,
                             option: new_order_option,
                         });
-
 
                         let new_remaining = {
                             let order = table::borrow(&orderbook.orders, new_order_id);
@@ -741,11 +675,9 @@ module perpetuity_sui::orderbook {
                     continue
                 };
 
-
                 bid_index = bid_index + 1;
             };
         };
-
 
         // Phase 2: Cross-asset (complementary) matching for remaining quantity
         let new_order_remaining = {
@@ -761,7 +693,6 @@ module perpetuity_sui::orderbook {
                 let ask_len = vector::length(&orderbook.ask_ids);
                 let mut ask_index = 0;
 
-
                 while (ask_index < ask_len) {
                     let ask_order_id = *vector::borrow(&orderbook.ask_ids, ask_index);
                     
@@ -770,11 +701,9 @@ module perpetuity_sui::orderbook {
                         continue
                     };
 
-
                     let ask_order = table::borrow(&orderbook.orders, ask_order_id);
                     let ask_price = ask_order.price;
                     let ask_option = ask_order.option;
-
 
                     if (ask_option == complementary_option && ask_price <= complementary_price) {
                         let new_order_remaining_now = {
@@ -782,12 +711,10 @@ module perpetuity_sui::orderbook {
                             order.quantity - order.filled_quantity
                         };
 
-
                         let ask_order_remaining = {
                             let order = table::borrow(&orderbook.orders, ask_order_id);
                             order.quantity - order.filled_quantity
                         };
-
 
                         if (new_order_remaining_now > 0 && ask_order_remaining > 0) {
                             let match_qty = if (new_order_remaining_now < ask_order_remaining) {
@@ -796,37 +723,31 @@ module perpetuity_sui::orderbook {
                                 ask_order_remaining
                             };
 
-
                             {
                                 let new_order = table::borrow_mut(&mut orderbook.orders, new_order_id);
                                 new_order.filled_quantity = new_order.filled_quantity + match_qty;
                             };
-
 
                             {
                                 let ask_order = table::borrow_mut(&mut orderbook.orders, ask_order_id);
                                 ask_order.filled_quantity = ask_order.filled_quantity + match_qty;
                             };
 
-
                             let buyer_addr = {
                                 let order = table::borrow(&orderbook.orders, new_order_id);
                                 order.trader
                             };
-
 
                             let seller_addr = {
                                 let order = table::borrow(&orderbook.orders, ask_order_id);
                                 order.trader
                             };
 
-
                             transfer_shares(market, seller_addr, buyer_addr, complementary_option, match_qty, ctx);
 
-
                             let payment_amount = new_order_price * match_qty;
-                            add_to_settlement(market, seller_addr, payment_amount);
-
+                            // ⭐ REPLACED: add_to_settlement → settle_trade_immediate
+                            settle_trade_immediate(market, seller_addr, payment_amount, ctx);
 
                             one::event::emit(CrossAssetMatched {
                                 bid_order_id: new_order_id,
@@ -839,7 +760,6 @@ module perpetuity_sui::orderbook {
                                 ask_option: complementary_option,
                             });
 
-
                             let new_remaining = {
                                 let order = table::borrow(&orderbook.orders, new_order_id);
                                 order.quantity - order.filled_quantity
@@ -851,13 +771,11 @@ module perpetuity_sui::orderbook {
                         }
                     };
 
-
                     ask_index = ask_index + 1;
                 };
             } else {
                 let bid_len = vector::length(&orderbook.bid_ids);
                 let mut bid_index = 0;
-
 
                 while (bid_index < bid_len) {
                     let bid_order_id = *vector::borrow(&orderbook.bid_ids, bid_index);
@@ -867,11 +785,9 @@ module perpetuity_sui::orderbook {
                         continue
                     };
 
-
                     let bid_order = table::borrow(&orderbook.orders, bid_order_id);
                     let bid_price = bid_order.price;
                     let bid_option = bid_order.option;
-
 
                     if (bid_option == complementary_option && bid_price >= complementary_price) {
                         let new_order_remaining_now = {
@@ -879,12 +795,10 @@ module perpetuity_sui::orderbook {
                             order.quantity - order.filled_quantity
                         };
 
-
                         let bid_order_remaining = {
                             let order = table::borrow(&orderbook.orders, bid_order_id);
                             order.quantity - order.filled_quantity
                         };
-
 
                         if (new_order_remaining_now > 0 && bid_order_remaining > 0) {
                             let match_qty = if (new_order_remaining_now < bid_order_remaining) {
@@ -893,37 +807,31 @@ module perpetuity_sui::orderbook {
                                 bid_order_remaining
                             };
 
-
                             {
                                 let bid_order = table::borrow_mut(&mut orderbook.orders, bid_order_id);
                                 bid_order.filled_quantity = bid_order.filled_quantity + match_qty;
                             };
-
 
                             {
                                 let new_order = table::borrow_mut(&mut orderbook.orders, new_order_id);
                                 new_order.filled_quantity = new_order.filled_quantity + match_qty;
                             };
 
-
                             let buyer_addr = {
                                 let order = table::borrow(&orderbook.orders, bid_order_id);
                                 order.trader
                             };
-
 
                             let seller_addr = {
                                 let order = table::borrow(&orderbook.orders, new_order_id);
                                 order.trader
                             };
 
-
                             transfer_shares(market, seller_addr, buyer_addr, complementary_option, match_qty, ctx);
 
-
                             let payment_amount = bid_price * match_qty;
-                            add_to_settlement(market, buyer_addr, payment_amount);
-
+                            // ⭐ REPLACED: add_to_settlement → settle_trade_immediate
+                            settle_trade_immediate(market, buyer_addr, payment_amount, ctx);
 
                             one::event::emit(CrossAssetMatched {
                                 bid_order_id,
@@ -936,7 +844,6 @@ module perpetuity_sui::orderbook {
                                 ask_option: new_order_option,
                             });
 
-
                             let new_remaining = {
                                 let order = table::borrow(&orderbook.orders, new_order_id);
                                 order.quantity - order.filled_quantity
@@ -948,18 +855,15 @@ module perpetuity_sui::orderbook {
                         }
                     };
 
-
                     bid_index = bid_index + 1;
                 };
             };
         };
     }
 
-
     // ============================================================================
     // Trade Settlement
     // ============================================================================
-
 
     /// Manually settle a trade between two orders
     /// Fills both orders and transfers shares
@@ -984,13 +888,11 @@ module perpetuity_sui::orderbook {
         assert!(table::contains(&orderbook.orders, buyer_order_id), EOrderNotFound);
         assert!(table::contains(&orderbook.orders, seller_order_id), EOrderNotFound);
 
-
         let buyer_order_option = {
             let buyer_order = table::borrow(&orderbook.orders, buyer_order_id);
             assert!(buyer_order.is_bid, EUnauthorized);
             buyer_order.option
         };
-
 
         let seller_order_option = {
             let seller_order = table::borrow(&orderbook.orders, seller_order_id);
@@ -998,36 +900,29 @@ module perpetuity_sui::orderbook {
             seller_order.option
         };
 
-
         assert!(buyer_order_option == seller_order_option, EMarketNotFound);
-
 
         {
             let buyer_order = table::borrow_mut(&mut orderbook.orders, buyer_order_id);
             buyer_order.filled_quantity = buyer_order.filled_quantity + matched_quantity;
         };
 
-
         {
             let seller_order = table::borrow_mut(&mut orderbook.orders, seller_order_id);
             seller_order.filled_quantity = seller_order.filled_quantity + matched_quantity;
         };
-
 
         let buyer_addr = {
             let buyer_order = table::borrow(&orderbook.orders, buyer_order_id);
             buyer_order.trader
         };
 
-
         let seller_addr = {
             let seller_order = table::borrow(&orderbook.orders, seller_order_id);
             seller_order.trader
         };
 
-
         transfer_shares(market, seller_addr, buyer_addr, buyer_order_option, matched_quantity, ctx);
-
 
         one::event::emit(TradeSettled {
             buyer_order_id,
@@ -1039,11 +934,9 @@ module perpetuity_sui::orderbook {
         });
     }
 
-
     // ============================================================================
     // Query Functions
     // ============================================================================
-
 
     /// Get the highest active bid price
     /// 
@@ -1063,7 +956,6 @@ module perpetuity_sui::orderbook {
         0
     }
 
-
     /// Get the lowest active ask price
     /// 
     /// # Arguments
@@ -1081,7 +973,6 @@ module perpetuity_sui::orderbook {
         };
         0
     }
-
 
     /// Get order book depth (number of bids and asks)
     /// 

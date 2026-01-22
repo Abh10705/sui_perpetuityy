@@ -3,15 +3,11 @@ module perpetuity_sui::outcome {
     use one::coin::{Self, Coin};
     use one::table::{Self, Table};
     use perpetuity_sui::types::Option;
-    use perpetuity_sui::types::option_a;
+    use perpetuity_sui::types::{option_a, option_b};
     
     // ============================================================================
     // Events (defined in outcome module)
     // ============================================================================
-
-
-
-
 
     public struct SharesTransferred has drop, copy {
         from: address,
@@ -21,27 +17,30 @@ module perpetuity_sui::outcome {
         market_id: u64,
     }
 
-
-
-
-
     public struct SettlementClaimed has drop, copy {
         user: address,
         amount: u64,
         market_id: u64,
     }
 
+    /// ⭐ NEW EVENT: Emitted when trade is settled atomically
+    public struct TradeSettledImmediate has drop, copy {
+        seller: address,
+        amount: u64,
+        market_id: u64,
+    }
 
-
-
+    /// ⭐ NEW EVENT: Emitted when shares are auto-minted on deposit
+    public struct SharesMinted has drop, copy {
+        trader: address,
+        option_a_quantity: u64,
+        option_b_quantity: u64,
+        market_id: u64,
+    }
 
     // ============================================================================
     // Error Codes
     // ============================================================================
-
-
-
-
 
     const EInsufficientBalance: u64 = 1;
     const EMarketNotFound: u64 = 2;
@@ -49,26 +48,14 @@ module perpetuity_sui::outcome {
     const EInvalidAmount: u64 = 4;
     const ENoSettlementFunds: u64 = 6;
 
-
-
-
-
     // ============================================================================
     // Struct Definitions
     // ============================================================================
-
-
-
-
 
     /// AdminCap grants the holder permission to create markets
     public struct AdminCap has key {
         id: one::object::UID,
     }
-
-
-
-
 
     /// User's balance in a specific market
     /// 
@@ -82,10 +69,6 @@ module perpetuity_sui::outcome {
         market_id: u64,
         balance: Balance<CoinType>,
     }
-
-
-
-
 
     /// Represents a binary prediction market
     /// 
@@ -106,17 +89,9 @@ module perpetuity_sui::outcome {
         is_active: bool,
     }
 
-
-
-
-
     // ============================================================================
     // Admin Functions
     // ============================================================================
-
-
-
-
 
     /// Create the admin capability (call once at deployment)
     /// 
@@ -129,17 +104,9 @@ module perpetuity_sui::outcome {
         one::transfer::transfer(admin_cap, one::tx_context::sender(ctx));
     }
 
-
-
-
-
     // ============================================================================
     // Market Management
     // ============================================================================
-
-
-
-
 
     /// Create a new binary prediction market
     /// Called by admin during market initialization
@@ -165,28 +132,23 @@ module perpetuity_sui::outcome {
         one::transfer::share_object(market);
     }
 
-
-
-
-
     /// Create a user's balance object for a market
     /// Called when user first deposits to a market
     /// 
     /// ✅ FIXED: Changed market parameter to immutable reference (&Market)
-    /// Shared objects on Sui can ONLY be passed by immutable reference, never by value or &mut
+    /// Shared objects on move can ONLY be passed by immutable reference, never by value or &mut
     /// 
     /// # Arguments
     /// - market: Reference to the market (immutable - shared objects must be read-only)
     /// - market_id: Market identifier
     /// - ctx: Transaction context
     public fun create_user_balance<CoinType>(
-        market: &Market<CoinType>,  // ✅ FIXED: Changed from "market: Market<CoinType>" to reference
+        market: &Market<CoinType>,
         market_id: u64,
         ctx: &mut one::tx_context::TxContext,
     ) {
         assert!(market.market_id == market_id, EMarketNotFound);
         let sender = one::tx_context::sender(ctx);
-        
         
         let user_balance: UserBalance<CoinType> = UserBalance {
             id: one::object::new(ctx),
@@ -197,37 +159,68 @@ module perpetuity_sui::outcome {
         one::transfer::transfer(user_balance, sender);
     }
 
-
-
-
-
     // ============================================================================
     // Balance Management (Public Helpers)
     // ============================================================================
 
-
-
-
-
-    /// Deposit funds into user's balance
-    /// Caller must provide the coins
+    /// ⭐ UPDATED: Deposit funds and automatically mint both shares
     /// 
     /// # Arguments
+    /// - market: The market (will mint shares here)
     /// - user_balance: User's balance object
     /// - coin: Coin to deposit
+    /// - ctx: Transaction context
+    /// 
+    /// # What happens:
+    /// 1. User deposits 1000 USDC
+    /// 2. 1000 added to user's collateral (for bidding)
+    /// 3. 1000 Barca shares minted and credited to user
+    /// 4. 1000 Madrid shares minted and credited to user
+    /// 5. SharesMinted event emitted
+    /// 
+    /// # Share Ownership:
+    /// Shares are owned by the WALLET ADDRESS (trader field in UserBalance)
+    /// Not by the UserBalance object ID
     public fun deposit_funds<CoinType>(
+        market: &mut Market<CoinType>,
         user_balance: &mut UserBalance<CoinType>,
         coin: Coin<CoinType>,
+        ctx: &mut one::tx_context::TxContext,
     ) {
         let amount = coin::value(&coin);
         assert!(amount > 0, EInvalidAmount);
         
+        // Step 1: Add coins to user's balance (collateral for bidding)
         balance::join(&mut user_balance.balance, coin::into_balance(coin));
+        
+        // Step 2: Get trader address (who owns the shares)
+        let trader = user_balance.trader;
+        let market_id = user_balance.market_id;
+        
+        // Step 3: Auto-mint Barca shares (OptionA)
+        if (table::contains(&market.option_a_shares, trader)) {
+            let shares = table::borrow_mut(&mut market.option_a_shares, trader);
+            *shares = *shares + amount;
+        } else {
+            table::add(&mut market.option_a_shares, trader, amount);
+        };
+        
+        // Step 4: Auto-mint Madrid shares (OptionB)
+        if (table::contains(&market.option_b_shares, trader)) {
+            let shares = table::borrow_mut(&mut market.option_b_shares, trader);
+            *shares = *shares + amount;
+        } else {
+            table::add(&mut market.option_b_shares, trader, amount);
+        };
+        
+        // Step 5: Emit event
+        one::event::emit(SharesMinted {
+            trader,
+            option_a_quantity: amount,
+            option_b_quantity: amount,
+            market_id,
+        });
     }
-
-
-
-
 
     /// Withdraw funds from user's balance
     /// Returns a Coin object that can be transferred
@@ -249,10 +242,6 @@ module perpetuity_sui::outcome {
         coin::from_balance(withdrawn, ctx)
     }
 
-
-
-
-
     /// Get user's balance amount
     /// 
     /// # Arguments
@@ -265,10 +254,6 @@ module perpetuity_sui::outcome {
     ): u64 {
         balance::value(&user_balance.balance)
     }
-
-
-
-
 
     // ============================================================================
     // ✅ NEW: Permission Check Helpers (for orderbook)
@@ -288,7 +273,6 @@ module perpetuity_sui::outcome {
         user_balance.trader
     }
 
-
     /// Get the market_id from a UserBalance
     /// Used by orderbook to verify permission checks
     /// 
@@ -303,16 +287,9 @@ module perpetuity_sui::outcome {
         user_balance.market_id
     }
 
-
-
-
     // ============================================================================
     // Share Management (Public Helpers)
     // ============================================================================
-
-
-
-
 
     /// Get user's shares from a table
     /// 
@@ -332,10 +309,6 @@ module perpetuity_sui::outcome {
             0
         }
     }
-
-
-
-
 
     /// Get trader's shares in a specific option
     /// 
@@ -358,10 +331,6 @@ module perpetuity_sui::outcome {
         };
         get_user_shares(shares_table, trader)
     }
-
-
-
-
 
     /// Transfer shares between traders (internal - called from orderbook)
     /// 
@@ -386,20 +355,12 @@ module perpetuity_sui::outcome {
             &mut market.option_b_shares
         };
 
-
-
-
-
         // Remove from sender
         if (table::contains(shares_table, from)) {
             let sender_shares = table::borrow_mut(shares_table, from);
             assert!(*sender_shares >= quantity, EInsufficientBalance);
             *sender_shares = *sender_shares - quantity;
         };
-
-
-
-
 
         // Add to receiver
         if (table::contains(shares_table, to)) {
@@ -408,10 +369,6 @@ module perpetuity_sui::outcome {
         } else {
             table::add(shares_table, to, quantity);
         };
-
-
-
-
 
         one::event::emit(SharesTransferred {
             from,
@@ -422,17 +379,9 @@ module perpetuity_sui::outcome {
         });
     }
 
-
-
-
-
     // ============================================================================
     // Settlement Pool Management (Public Helpers)
     // ============================================================================
-
-
-
-
 
     /// Add funds to a trader's settlement pool
     /// Called when a trade is settled
@@ -454,10 +403,6 @@ module perpetuity_sui::outcome {
         };
     }
 
-
-
-
-
     /// Claim settlement funds
     /// Transfers settlement pool balance to user's available balance
     /// 
@@ -473,24 +418,12 @@ module perpetuity_sui::outcome {
         let sender = one::tx_context::sender(ctx);
         assert!(user_balance.trader == sender, EUnauthorized);
 
-
-
-
-
         if (table::contains(&market.settlement_pool, sender)) {
             let amount = table::remove(&mut market.settlement_pool, sender);
             assert!(amount > 0, ENoSettlementFunds);
 
-
-
-
-
             let settlement_funds = balance::split(&mut market.vault, amount);
             balance::join(&mut user_balance.balance, settlement_funds);
-
-
-
-
 
             one::event::emit(SettlementClaimed {
                 user: sender,
@@ -499,8 +432,9 @@ module perpetuity_sui::outcome {
             });
         };
     }
+
     /// Refund locked collateral from market vault to user balance
-/// Called when an order is cancelled
+    /// Called when an order is cancelled
     public fun refund_bid_collateral<CoinType>(
         market: &mut Market<CoinType>,
         user_balance: &mut UserBalance<CoinType>,
@@ -510,5 +444,66 @@ module perpetuity_sui::outcome {
         balance::join(&mut user_balance.balance, refund_balance);
     }
 
+    /// ⭐ NEW FUNCTION: Lock bid collateral into market vault
+    /// Called when a bid order is placed to lock coins
+    /// Opposite of refund_bid_collateral()
+    /// 
+    /// # Arguments
+    /// - market: The market
+    /// - user_balance: User's balance object
+    /// - lock_amount: Amount to lock from user balance into vault
+    public fun lock_bid_collateral<CoinType>(
+        market: &mut Market<CoinType>,
+        user_balance: &mut UserBalance<CoinType>,
+        lock_amount: u64,
+    ) {
+        // Take coins FROM user's balance
+        let locked = balance::split(&mut user_balance.balance, lock_amount);
+        // Put coins INTO market vault
+        balance::join(&mut market.vault, locked);
+    }
 
+    // ============================================================================
+    // ⭐ NEW: ATOMIC SETTLEMENT FUNCTION
+    // ============================================================================
+
+    /// ⭐ NEW FUNCTION: Settle a trade atomically
+    /// Transfers coins directly from vault to seller in same transaction
+    /// Called from orderbook when a trade matches
+    /// 
+    /// This replaces the settlement pool mechanism for immediate payouts:
+    /// - OLD: add_to_settlement() → coins sit in pool → claim_settlement() needed
+    /// - NEW: settle_trade_immediate() → coins transferred directly in 1 tx
+    /// 
+    /// # Arguments
+    /// - market: The market (vault holds locked coins from bids)
+    /// - seller_addr: Address of seller receiving payment
+    /// - payment_amount: Amount to transfer from vault to seller
+    /// - ctx: Transaction context
+    public fun settle_trade_immediate<CoinType>(
+        market: &mut Market<CoinType>,
+        seller_addr: address,
+        payment_amount: u64,
+        ctx: &mut one::tx_context::TxContext,
+    ) {
+        // Validate inputs
+        assert!(payment_amount > 0, EInvalidAmount);
+        assert!(balance::value(&market.vault) >= payment_amount, EInsufficientBalance);
+        
+        // Split payment from vault
+        let payment_balance = balance::split(&mut market.vault, payment_amount);
+        
+        // Convert Balance to Coin
+        let payment_coin = coin::from_balance(payment_balance, ctx);
+        
+        // Transfer directly to seller
+        one::transfer::public_transfer(payment_coin, seller_addr);
+
+        // Emit event for tracking
+        one::event::emit(TradeSettledImmediate {
+            seller: seller_addr,
+            amount: payment_amount,
+            market_id: market.market_id,
+        });
+    }
 }

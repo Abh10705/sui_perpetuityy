@@ -3,10 +3,12 @@
 import { useState, useEffect } from 'react';
 import { useSignAndExecuteTransaction, useCurrentAccount } from '@mysten/dapp-kit';
 import { Transaction } from '@mysten/sui/transactions';
-import { Inputs } from '@mysten/sui/transactions';
-import { useSuiClient } from '@mysten/dapp-kit';
 import { SuiObjectChange } from '@mysten/sui/client';
 import { CONTRACTS } from '@/lib/constants';
+// ✅ FIXED: Import from your ONE chain client, not useSuiClient hook
+import { suiClient } from '@/lib/sui/client';
+// ✅ FIXED: Removed getSharedObjectRef (no longer needed)
+import { buildDepositWithCoin, buildPlaceOrderTransaction } from '@/lib/sui/contracts';
 
 interface TxResult {
   digest?: string;
@@ -33,12 +35,11 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
   const [isCheckingExisting, setIsCheckingExisting] = useState(false);
   
   const { mutate: signAndExecute } = useSignAndExecuteTransaction();
-  const suiClient = useSuiClient();
+  // ✅ FIXED: No longer use useSuiClient() - use imported suiClient from your client.ts
   const currentAccount = useCurrentAccount();
 
   const collateral = price && quantity ? (parseFloat(price) * parseFloat(quantity)).toFixed(4) : '0';
 
-  // ✅ Auto-detect existing UserBalance for connected wallet
   useEffect(() => {
     const loadExistingUserBalance = async () => {
       if (!currentAccount?.address) {
@@ -84,7 +85,7 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
     };
 
     loadExistingUserBalance();
-  }, [currentAccount?.address, suiClient, userBalance, onBalanceChange]);
+  }, [currentAccount?.address, userBalance, onBalanceChange]);
 
   const extractUserBalanceFromDigest = async (
     digest: string,
@@ -134,9 +135,7 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
     return null;
   };
 
-  // ✅ Step 0 - Create UserBalance
   const handleCreateUserBalance = async () => {
-    
     if (!currentAccount?.address) {
       setMessage({ type: 'error', text: 'Please connect your wallet first' });
       return;
@@ -152,13 +151,7 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
         target: `${CONTRACTS.PACKAGE_ID}::outcome::create_user_balance`,
         typeArguments: ['0x2::oct::OCT'],
         arguments: [
-          tx.object(
-            Inputs.SharedObjectRef({
-              objectId: CONTRACTS.MARKET_ID,
-              initialSharedVersion: 21541,
-              mutable: false,
-            })
-          ),
+          tx.object(CONTRACTS.MARKET_ID),  // ✅ FIXED: No SharedObjectRef wrapper
           tx.pure.u64(1),
         ],
       });
@@ -261,7 +254,7 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
     }
   };
 
-  // ✅ Step 1 - Deposit (WITH ENHANCED DEBUGGING)
+  // ✅ Step 1 - Deposit (Uses buildDepositWithCoin helper)
   const handleDeposit = async () => {
     if (!userBalance) {
       setMessage({ type: 'error', text: 'Please create account first (Step 0)' });
@@ -277,82 +270,38 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
     setMessage(null);
 
     try {
-      console.log('🔍 DEBUG: Starting deposit process...');
-      console.log('🔍 UserBalance ID:', userBalance);
-      console.log('🔍 Deposit Amount:', depositAmount);
+      console.log('🔍 DEBUG: Starting deposit...');
 
-      // ✅ Fetch OCT coins with detailed info
       const octCoins = await suiClient.getOwnedObjects({
         owner: currentAccount!.address!,
-        filter: {
-          StructType: '0x2::coin::Coin<0x2::oct::OCT>',
-        },
-        options: {
-          showContent: true,
-          showType: true,
-        }
+        filter: { StructType: '0x2::coin::Coin<0x2::oct::OCT>' },
+        options: { showContent: true }
       });
 
-      console.log('🔍 Found OCT coins:', octCoins.data.length);
-      
       if (octCoins.data.length === 0) {
-        setMessage({ type: 'error', text: 'No OCT coins found in wallet. Get some OCT first!' });
+        setMessage({ type: 'error', text: 'No OCT coins found!' });
         setLoading(false);
         return;
       }
-
-      // Log all OCT coins with their balances
-      octCoins.data.forEach((coin, index) => {
-        const content = coin.data?.content;
-        if (content && 'fields' in content) {
-          const balance = (content.fields as any).balance;
-          console.log(`🔍 OCT Coin ${index}:`, coin.data?.objectId, 'Balance:', balance);
-        }
-      });
 
       const octCoinId = octCoins.data[0].data?.objectId;
+      
+      // ✅ FIXED: Safe optional chaining without non-null assertion
       if (!octCoinId) {
-        setMessage({ type: 'error', text: 'Could not get OCT coin ID' });
+        setMessage({ type: 'error', text: 'Could not get coin ID' });
         setLoading(false);
         return;
       }
-
-      console.log('🔍 Using OCT Coin:', octCoinId);
-
-      const amountMist = Math.floor(parseFloat(depositAmount) * 1e9);
-      console.log('🔍 Amount in MIST:', amountMist);
-
-      const tx = new Transaction();
       
-      // Split from OCT coin
-      const [coin] = tx.splitCoins(tx.object(octCoinId), [amountMist]);
+      console.log('🔍 Using coin:', octCoinId);
 
-      tx.moveCall({
-        target: `${CONTRACTS.PACKAGE_ID}::outcome::deposit_funds`,
-        typeArguments: ['0x2::oct::OCT'],
-        arguments: [
-          tx.object(userBalance),  // OWNED object
-          coin,                     // Split coin
-        ],
-      });
-
-      tx.setGasBudget(1000000000);
-
-      console.log('🔍 Transaction built, sending to wallet...');
+      // ✅ Use the new buildDepositWithCoin helper
+      const tx = buildDepositWithCoin(CONTRACTS.MARKET_ID,userBalance, octCoinId, parseFloat(depositAmount));
 
       let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
-      const clearTimeoutSafely = () => {
-        if (timeoutId !== null) {
-          clearTimeout(timeoutId);
-        }
-      };
-
       timeoutId = setTimeout(() => {
-        setMessage({
-          type: 'error',
-          text: 'Wallet did not respond within 60 seconds',
-        });
+        setMessage({ type: 'error', text: 'Wallet timeout (60s)' });
         setLoading(false);
       }, 60000);
 
@@ -360,33 +309,30 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
         { transaction: tx },
         {
           onSuccess: (result: TxResult) => {
-            clearTimeoutSafely();
-            console.log('✅ Transaction successful!', result.digest);
-            
+            clearTimeout(timeoutId!);
+            console.log('✅ Deposit success!', result.digest);
             setMessage({
               type: 'success',
-              text: `✅ Deposited ${depositAmount} OCT! TX: ${result.digest?.slice(0, 10)}...`,
+              text: `✅ Deposited! TX: ${result.digest?.slice(0, 10)}...`,
             });
             setDepositAmount('');
             setLoading(false);
           },
-          onError: (error: ErrorWithCode) => {
-            clearTimeoutSafely();
-            console.error('❌ Transaction failed:', error);
-            console.error('❌ Error message:', error.message);
-            console.error('❌ Error stack:', error.stack);
-            
+          onError: (error: unknown) => {
+            clearTimeout(timeoutId!);
+            console.error('❌ Deposit error:', error);
+            const errorMsg = error instanceof Error ? error.message : String(error);
             setMessage({
               type: 'error',
-              text: `Failed: ${error.message || 'Unknown error'}`,
+              text: errorMsg || 'Deposit failed',
             });
             setLoading(false);
           },
         }
       );
 
-    } catch (err) {
-      console.error('❌ Catch block error:', err);
+    } catch (err: unknown) {
+      console.error('❌ Error:', err);
       const errorMsg = err instanceof Error ? err.message : 'Unknown error';
       setMessage({
         type: 'error',
@@ -396,7 +342,7 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
     }
   };
 
-  // ✅ Step 2 - Place Order
+  // ✅ Step 2 - Place Order (Uses buildPlaceOrderTransaction)
   const handlePlaceOrder = async () => {
     if (!userBalance) {
       setMessage({ type: 'error', text: 'Please deposit funds first' });
@@ -412,38 +358,14 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
     setMessage(null);
 
     try {
-      const priceInCents = Math.floor(parseFloat(price) * 100);
-      const qty = Math.floor(parseFloat(quantity));
-      
-      const tx = new Transaction();
-
-      tx.moveCall({
-        target: `${CONTRACTS.PACKAGE_ID}::orderbook::place_order_cli`,
-        typeArguments: ['0x2::oct::OCT'],
-        arguments: [
-          tx.object(
-            Inputs.SharedObjectRef({
-              objectId: CONTRACTS.ORDERBOOK_ID,
-              initialSharedVersion: 21542,
-              mutable: true,
-            })
-          ),
-          tx.object(
-            Inputs.SharedObjectRef({
-              objectId: CONTRACTS.MARKET_ID,
-              initialSharedVersion: 21541,
-              mutable: true,
-            })
-          ),
-          tx.object(userBalance),
-          tx.pure.u8(selectedTeam === 'barca' ? 0 : 1),
-          tx.pure.u64(priceInCents),
-          tx.pure.u64(qty),
-          tx.pure.bool(side === 'buy'),
-        ],
-      });
-
-      tx.setGasBudget(1000000000);
+      // ✅ Use the builder function (no suiClient parameter needed)
+      const tx = await buildPlaceOrderTransaction(
+        userBalance,
+        selectedTeam === 'barca' ? 0 : 1,
+        parseFloat(price),
+        parseFloat(quantity),
+        side === 'buy'
+      );
 
       signAndExecute(
         { transaction: tx },
@@ -457,7 +379,7 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
             setQuantity('');
             setLoading(false);
           },
-          onError: (error: Error | unknown) => {
+          onError: (error: unknown) => {
             let errorMsg = 'Failed to place order';
             if (error instanceof Error) {
               errorMsg = error.message;
@@ -477,13 +399,12 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
       const errorMsg = err instanceof Error ? err.message : 'Unknown error';
       setMessage({
         type: 'error',
-        text: errorMsg || 'Unknown error',
+        text: errorMsg,
       });
       setLoading(false);
     }
   };
 
-  // ✅ Handle logout/clear account
   const handleLogout = () => {
     if (currentAccount?.address) {
       localStorage.removeItem(`userBalance_${currentAccount.address}`);
@@ -598,15 +519,16 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
           </div>
 
           <div className="mb-4">
-            <label className="mb-2 block text-sm text-gray-400">Price (OCT)</label>
+            <label className="mb-2 block text-sm text-gray-400">Price (0-100)</label>
             <input
               type="number"
               placeholder="0.00"
               value={price}
               onChange={(e) => setPrice(e.target.value)}
               className="w-full rounded-lg border border-gray-600 bg-gray-800 px-4 py-2 text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none"
-              step="0.01"
-              min="0"
+              step="1"
+              min="1"
+              max="99"
             />
           </div>
 
@@ -654,7 +576,7 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
               : 'bg-red-500 hover:bg-red-600 disabled:bg-gray-600'
           } text-white disabled:text-gray-400 disabled:cursor-not-allowed transition-all`}
         >
-          {loading ? 'Processing...' : `${side === 'buy' ? 'Buy' : 'Sell'} ${quantity || '0'} ${selectedTeam === 'barca' ? 'Barca' : 'Madrid'} @ ${price || '0.00'} OCT`}
+          {loading ? 'Processing...' : `${side === 'buy' ? 'Buy' : 'Sell'} ${quantity || '0'} ${selectedTeam === 'barca' ? 'Barca' : 'Madrid'} @ ${price || '0.00'}`}
         </button>
       )}
     </div>
