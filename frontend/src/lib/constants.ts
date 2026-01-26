@@ -1,10 +1,10 @@
 export const CONTRACTS = {
   // Your deployed contract
-  PACKAGE_ID: '0xaf04060398bad888fbfff03abf0cb0b13fbd1ed9746c1571a1eabe2bfbcbe6f6',
+  PACKAGE_ID: '0x47b198aaaaca365f027b7e80b3f94fc35f482d4fc20026f8dacaa72d000663fc',
   
   // Your market (Barca vs Madrid)
-  MARKET_ID: '0x22637140022c4ba6de579a415cef91dc239f56178d0bbce9e51a41086d17a751',
-  ORDERBOOK_ID: '0x7890185cdb77b49de1387a56c4ef261dfbda360d1c7fe823ec87bc4abed45c25',
+  MARKET_ID: '0x6441136612b7284cdc0dea507132680bc4d1e5f40dac18fa8f3d6194a6ddc4da',
+  ORDERBOOK_ID: '0x46ee5fcf2529579c2e3f6ce2d289b7e85fb2447e946e9b4fcab7445fe0704a6f',
   
   // Market details
   MARKET_QUESTION: 'Which team is better? Barca or Madrid',
