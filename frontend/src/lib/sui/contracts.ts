@@ -3,11 +3,13 @@ import { CONTRACTS } from '@/lib/constants';
 import { suiClient } from '@/lib/sui/client';
 
 
+
 export interface PlaceOrderResult {
   success: boolean;
   txDigest?: string;
   error?: string;
 }
+
 
 
 /**
@@ -18,6 +20,7 @@ export async function createUserBalance(): Promise<PlaceOrderResult> {
     const tx = new Transaction();
 
 
+
     tx.moveCall({
       target: `${CONTRACTS.PACKAGE_ID}::outcome::create_user_balance`,
       typeArguments: ['0x2::oct::OCT'],
@@ -26,6 +29,7 @@ export async function createUserBalance(): Promise<PlaceOrderResult> {
         tx.pure.u64(1),
       ],
     });
+
 
 
     console.log('✅ Transaction built for create_user_balance');
@@ -43,34 +47,41 @@ export async function createUserBalance(): Promise<PlaceOrderResult> {
 }
 
 
+
 /**
- * ✅ FIXED: Build deposit transaction with coin splitting
+ * ✅ FIXED: Build deposit transaction using gas coin (most reliable approach)
+ * 
+ * This approach:
+ * 1. Uses tx.gas for splitting (always up-to-date)
+ * 2. Splits the deposit amount from gas
+ * 3. Sends the split coin to deposit_funds
+ * 
+ * This avoids version conflicts that happen with mergeCoins
  */
 export function buildDepositWithCoin(
   marketId: string,
   userBalanceId: string,
-  octCoinId: string,
+  octCoinIds: string[],
   amount: number
 ): Transaction {
   const tx = new Transaction();
 
-
   console.log('📤 Deposit transaction:');
   console.log('  UserBalance:', userBalanceId);
-  console.log('  Coin:', octCoinId);
   console.log('  Amount:', amount, 'OCT');
 
-
   const amountMist = BigInt(Math.floor(amount * 1e9));
-  
   console.log('  Amount Mist:', amountMist.toString());
 
-
-  const [depositCoin] = tx.splitCoins(tx.object(octCoinId), [
+  // ✅ CRITICAL FIX: Use tx.gas instead of merging coins
+  // tx.gas is ALWAYS the latest version and avoids version conflicts
+  const [depositCoin] = tx.splitCoins(tx.gas, [
     tx.pure.u64(amountMist),
   ]);
 
+  console.log('✅ Using gas coin for deposit (avoids version conflicts)');
 
+  // ✅ Call deposit with the split coin
   tx.moveCall({
     target: `${CONTRACTS.PACKAGE_ID}::outcome::deposit_funds`,
     typeArguments: ['0x2::oct::OCT'],
@@ -81,12 +92,11 @@ export function buildDepositWithCoin(
     ],
   });
 
-
   tx.setGasBudget(100000000);
-
 
   return tx;
 }
+
 
 
 /**
@@ -119,7 +129,9 @@ export async function buildPlaceOrderTransaction(
 ): Promise<Transaction> {
   const tx = new Transaction();
 
+
   console.log('🚀 buildPlaceOrderTransaction called with:', { userBalanceId, option, price, quantity, isBuy });
+
 
   // ✅ VALIDATION: Catch invalid inputs early
   if (!userBalanceId) {
@@ -155,6 +167,7 @@ export async function buildPlaceOrderTransaction(
   }
 
 
+
   console.log('📊 Place order transaction:');
   console.log('  ✅ Validation passed!');
   console.log('  Orderbook:', CONTRACTS.ORDERBOOK_ID);
@@ -167,20 +180,24 @@ export async function buildPlaceOrderTransaction(
   console.log('  Side:', isBuy ? 'BUY' : 'SELL');
 
 
+
   // ✅ FIXED: Convert to BigInt using the adjusted price
   // If user typed 0.20, priceForContract is now 20
   // If user typed 20, priceForContract is now 20
   const priceValue = BigInt(Math.round(priceForContract));
   const qty = BigInt(Math.round(quantity));
 
+
   console.log('🔍 DEBUG - Final values going to contract:');
   console.log('  priceValue (BigInt):', priceValue.toString());
   console.log('  qty (BigInt):', qty.toString());
   console.log('  Will be sent as: tx.pure.u64(' + priceValue.toString() + ')');
 
+
   console.log('  Converted to BigInt:');
   console.log('    Price:', priceValue.toString());
   console.log('    Quantity:', qty.toString());
+
 
 
   // ✅ Call place_order_cli which converts u8 to Option internally
@@ -199,11 +216,14 @@ export async function buildPlaceOrderTransaction(
   });
 
 
+
   tx.setGasBudget(500000000);
+
 
 
   return tx;
 }
+
 
 
 /**
@@ -216,7 +236,9 @@ export async function buildCancelOrderTransaction(
   const tx = new Transaction();
 
 
+
   const orderIdValue = BigInt(orderId);
+
 
 
   tx.moveCall({
@@ -231,11 +253,14 @@ export async function buildCancelOrderTransaction(
   });
 
 
+
   tx.setGasBudget(500000000);
+
 
 
   return tx;
 }
+
 
 
 export async function getTopBid(): Promise<number> {
@@ -248,6 +273,7 @@ export async function getTopBid(): Promise<number> {
 }
 
 
+
 export async function getTopAsk(): Promise<number> {
   try {
     return 0;
@@ -256,6 +282,7 @@ export async function getTopAsk(): Promise<number> {
     return 0;
   }
 }
+
 
 
 export async function getOrderbookDepth(): Promise<[number, number]> {

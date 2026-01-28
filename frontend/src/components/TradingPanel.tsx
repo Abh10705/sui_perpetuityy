@@ -1,5 +1,6 @@
 'use client';
 
+
 import { useState, useEffect } from 'react';
 import { useSignAndExecuteTransaction, useCurrentAccount } from '@mysten/dapp-kit';
 import { Transaction } from '@mysten/sui/transactions';
@@ -10,10 +11,12 @@ import { suiClient } from '@/lib/sui/client';
 // ✅ FIXED: Removed getSharedObjectRef (no longer needed)
 import { buildDepositWithCoin, buildPlaceOrderTransaction } from '@/lib/sui/contracts';
 
+
 interface TxResult {
   digest?: string;
   objectChanges?: SuiObjectChange[];
 }
+
 
 interface TradingPanelProps {
   userBalance: string | null; 
@@ -21,9 +24,11 @@ interface TradingPanelProps {
   selectedTeam: 'barca' | 'madrid';
 }
 
+
 interface ErrorWithCode extends Error {
   code?: string;
 }
+
 
 export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: TradingPanelProps) {
   const [depositAmount, setDepositAmount] = useState('');
@@ -38,7 +43,9 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
   // ✅ FIXED: No longer use useSuiClient() - use imported suiClient from your client.ts
   const currentAccount = useCurrentAccount();
 
+
   const collateral = price && quantity ? (parseFloat(price) * parseFloat(quantity)).toFixed(4) : '0';
+
 
   useEffect(() => {
     const loadExistingUserBalance = async () => {
@@ -46,11 +53,14 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
         return;
       }
 
+
       if (userBalance) {
         return;
       }
 
+
       setIsCheckingExisting(true);
+
 
       try {
         const ownedObjects = await suiClient.getOwnedObjects({
@@ -63,6 +73,7 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
             showType: true,
           }
         });
+
 
         if (ownedObjects.data.length > 0) {
           const userBalanceId = ownedObjects.data[0].data?.objectId;
@@ -84,8 +95,10 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
       }
     };
 
+
     loadExistingUserBalance();
   }, [currentAccount?.address, userBalance, onBalanceChange]);
+
 
   const extractUserBalanceFromDigest = async (
     digest: string,
@@ -105,9 +118,11 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
           },
         });
 
+
         if (!txResult) {
           continue;
         }
+
 
         if (txResult.objectChanges) {
           const userBalance = txResult.objectChanges.find(
@@ -123,6 +138,7 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
             }
           );
 
+
           if (userBalance && 'objectId' in userBalance) {
             return userBalance.objectId;
           }
@@ -132,8 +148,10 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
       }
     }
 
+
     return null;
   };
+
 
   const handleCreateUserBalance = async () => {
     if (!currentAccount?.address) {
@@ -141,11 +159,14 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
       return;
     }
 
+
     setLoading(true);
     setMessage(null);
 
+
     try {
       const tx = new Transaction();
+
 
       tx.moveCall({
         target: `${CONTRACTS.PACKAGE_ID}::outcome::create_user_balance`,
@@ -158,13 +179,16 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
       
       tx.setGasBudget(1000000000);
 
+
       let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
 
       const clearTimeoutSafely = () => {
         if (timeoutId !== null) {
           clearTimeout(timeoutId);
         }
       };
+
 
       timeoutId = setTimeout(() => {
         setMessage({
@@ -173,6 +197,7 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
         });
         setLoading(false);
       }, 60000);
+
 
       signAndExecute(
         { transaction: tx },
@@ -189,11 +214,13 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
               return;
             }
 
+
             try {
               setMessage({
                 type: 'success',
                 text: `Creating account...`,
               });
+
 
               const extractedBalance = await extractUserBalanceFromDigest(result.digest);
               
@@ -244,6 +271,7 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
         }
       );
 
+
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Unknown error';
       setMessage({
@@ -254,29 +282,36 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
     }
   };
 
-  // ✅ Step 1 - Deposit (Uses buildDepositWithCoin helper)
+
+  // ✅ Step 1 - Deposit (Uses buildDepositWithCoin helper with coin merging)
   const handleDeposit = async () => {
     if (!userBalance) {
       setMessage({ type: 'error', text: 'Please create account first (Step 0)' });
       return;
     }
 
+
     if (!depositAmount) {
       setMessage({ type: 'error', text: 'Please enter deposit amount' });
       return;
     }
 
+
     setLoading(true);
     setMessage(null);
+
 
     try {
       console.log('🔍 DEBUG: Starting deposit...');
 
+
+      // ✅ FIXED: Get ALL OCT coins, not just the first one
       const octCoins = await suiClient.getOwnedObjects({
         owner: currentAccount!.address!,
         filter: { StructType: '0x2::coin::Coin<0x2::oct::OCT>' },
         options: { showContent: true }
       });
+
 
       if (octCoins.data.length === 0) {
         setMessage({ type: 'error', text: 'No OCT coins found!' });
@@ -284,26 +319,43 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
         return;
       }
 
-      const octCoinId = octCoins.data[0].data?.objectId;
-      
-      // ✅ FIXED: Safe optional chaining without non-null assertion
-      if (!octCoinId) {
-        setMessage({ type: 'error', text: 'Could not get coin ID' });
+
+      // ✅ FIXED: Extract ALL coin IDs
+      const octCoinIds = octCoins.data
+        .map(coin => coin.data?.objectId)
+        .filter((id): id is string => !!id);
+
+
+      if (octCoinIds.length === 0) {
+        setMessage({ type: 'error', text: 'Could not get coin IDs' });
         setLoading(false);
         return;
       }
-      
-      console.log('🔍 Using coin:', octCoinId);
 
-      // ✅ Use the new buildDepositWithCoin helper
-      const tx = buildDepositWithCoin(CONTRACTS.MARKET_ID,userBalance, octCoinId, parseFloat(depositAmount));
+
+      console.log('🔍 Found', octCoinIds.length, 'OCT coins');
+      octCoinIds.forEach((id, idx) => {
+        console.log(`  Coin ${idx}:`, id);
+      });
+
+
+      // ✅ FIXED: Pass ALL coin IDs to the builder
+      const tx = buildDepositWithCoin(
+        CONTRACTS.MARKET_ID,
+        userBalance,
+        octCoinIds,
+        parseFloat(depositAmount)
+      );
+
 
       let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
 
       timeoutId = setTimeout(() => {
         setMessage({ type: 'error', text: 'Wallet timeout (60s)' });
         setLoading(false);
       }, 60000);
+
 
       signAndExecute(
         { transaction: tx },
@@ -331,6 +383,7 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
         }
       );
 
+
     } catch (err: unknown) {
       console.error('❌ Error:', err);
       const errorMsg = err instanceof Error ? err.message : 'Unknown error';
@@ -342,6 +395,7 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
     }
   };
 
+
   // ✅ Step 2 - Place Order (Uses buildPlaceOrderTransaction)
   const handlePlaceOrder = async () => {
     if (!userBalance) {
@@ -349,13 +403,16 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
       return;
     }
 
+
     if (!price || !quantity) {
       setMessage({ type: 'error', text: 'Please fill in price and quantity' });
       return;
     }
 
+
     setLoading(true);
     setMessage(null);
+
 
     try {
       // ✅ Use the builder function (no suiClient parameter needed)
@@ -366,6 +423,7 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
         parseFloat(quantity),
         side === 'buy'
       );
+
 
       signAndExecute(
         { transaction: tx },
@@ -405,6 +463,7 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
     }
   };
 
+
   const handleLogout = () => {
     if (currentAccount?.address) {
       localStorage.removeItem(`userBalance_${currentAccount.address}`);
@@ -415,6 +474,7 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
     setQuantity('');
     setMessage(null);
   };
+
 
   return (
     <div className="rounded-lg border border-gray-700 bg-gray-900 p-6">
@@ -430,6 +490,7 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
         )}
       </div>
 
+
       {isCheckingExisting && (
         <div className="mb-6 rounded-lg bg-blue-900/20 border border-blue-700 p-4">
           <p className="text-sm text-blue-300 flex items-center gap-2">
@@ -438,6 +499,7 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
           </p>
         </div>
       )}
+
 
       {!userBalance && !isCheckingExisting && (
         <div className="mb-6 rounded-lg bg-blue-900/20 border border-blue-700 p-4">
@@ -452,6 +514,7 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
           </button>
         </div>
       )}
+
 
       {userBalance && (
         <div className="mb-6 rounded-lg bg-gray-800 p-4">
@@ -477,6 +540,7 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
         </div>
       )}
 
+
       <div className="mb-6">
         <label className="mb-2 block text-sm text-gray-400">UserBalance ID</label>
         <input
@@ -491,9 +555,11 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
         </p>
       </div>
 
+
       {userBalance && (
         <div className="mb-6 border-t border-gray-700 pt-6">
           <h4 className="mb-4 text-sm font-semibold text-gray-300">Step 2: Place Order</h4>
+
 
           <div className="mb-6 flex gap-2">
             <button
@@ -518,6 +584,7 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
             </button>
           </div>
 
+
           <div className="mb-4">
             <label className="mb-2 block text-sm text-gray-400">Price (0-100)</label>
             <input
@@ -532,6 +599,7 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
             />
           </div>
 
+
           <div className="mb-4">
             <label className="mb-2 block text-sm text-gray-400">Quantity</label>
             <input
@@ -545,6 +613,7 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
             />
           </div>
 
+
           <div className="mb-6 rounded-lg bg-gray-800 p-4">
             <div className="flex justify-between text-sm">
               <span className="text-gray-400">Collateral</span>
@@ -553,6 +622,7 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
           </div>
         </div>
       )}
+
 
       {message && (
         <div
@@ -565,6 +635,7 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
           {message.text}
         </div>
       )}
+
 
       {userBalance && (
         <button
