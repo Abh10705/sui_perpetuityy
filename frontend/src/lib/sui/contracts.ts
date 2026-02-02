@@ -2,15 +2,11 @@ import { Transaction } from '@mysten/sui/transactions';
 import { CONTRACTS } from '@/lib/constants';
 import { suiClient } from '@/lib/sui/client';
 
-
-
 export interface PlaceOrderResult {
   success: boolean;
   txDigest?: string;
   error?: string;
 }
-
-
 
 /**
  * ✅ Create user balance
@@ -19,18 +15,14 @@ export async function createUserBalance(): Promise<PlaceOrderResult> {
   try {
     const tx = new Transaction();
 
-
-
     tx.moveCall({
       target: `${CONTRACTS.PACKAGE_ID}::outcome::create_user_balance`,
-      typeArguments: ['0x2::oct::OCT'],
+      typeArguments: ['0x8b76fc2a2317d45118770cefed7e57171a08c477ed16283616b15f099391f120::hackathon::HACKATHON'],
       arguments: [
         tx.object(CONTRACTS.MARKET_ID),
         tx.pure.u64(1),
       ],
     });
-
-
 
     console.log('✅ Transaction built for create_user_balance');
     
@@ -46,45 +38,50 @@ export async function createUserBalance(): Promise<PlaceOrderResult> {
   }
 }
 
-
-
 /**
- * ✅ FIXED: Build deposit transaction using gas coin (most reliable approach)
+ * ✅ FIXED: Build deposit transaction using ACTUAL HACKATHON coins
  * 
- * This approach:
- * 1. Uses tx.gas for splitting (always up-to-date)
- * 2. Splits the deposit amount from gas
- * 3. Sends the split coin to deposit_funds
- * 
- * This avoids version conflicts that happen with mergeCoins
+ * CRITICAL: Cannot use tx.gas because gas is OCT/ONE, not HACKATHON!
+ * Must use actual HACKATHON coin objects from wallet.
  */
 export function buildDepositWithCoin(
   marketId: string,
   userBalanceId: string,
-  octCoinIds: string[],
+  hackathonCoinIds: string[],
   amount: number
 ): Transaction {
   const tx = new Transaction();
 
   console.log('📤 Deposit transaction:');
   console.log('  UserBalance:', userBalanceId);
-  console.log('  Amount:', amount, 'OCT');
+  console.log('  Amount:', amount, 'HACKATHON');
+  console.log('  Available HACKATHON coins:', hackathonCoinIds.length);
+
+  if (hackathonCoinIds.length === 0) {
+    throw new Error('❌ No HACKATHON coins found! You need HACKATHON coins to deposit.');
+  }
 
   const amountMist = BigInt(Math.floor(amount * 1e9));
   console.log('  Amount Mist:', amountMist.toString());
 
-  // ✅ CRITICAL FIX: Use tx.gas instead of merging coins
-  // tx.gas is ALWAYS the latest version and avoids version conflicts
-  const [depositCoin] = tx.splitCoins(tx.gas, [
-    tx.pure.u64(amountMist),
-  ]);
+  // ✅ Use actual HACKATHON coins (NOT gas coin!)
+  const baseCoin = tx.object(hackathonCoinIds[0]);
+  
+  // Merge all HACKATHON coins if user has multiple
+  if (hackathonCoinIds.length > 1) {
+    const coinsToMerge = hackathonCoinIds.slice(1).map(id => tx.object(id));
+    tx.mergeCoins(baseCoin, coinsToMerge);
+    console.log(`✅ Merged ${hackathonCoinIds.length} HACKATHON coins`);
+  }
+  
+  // Split the deposit amount from merged HACKATHON coin
+  const [depositCoin] = tx.splitCoins(baseCoin, [tx.pure.u64(amountMist)]);
+  console.log('✅ Split deposit amount from HACKATHON coins');
 
-  console.log('✅ Using gas coin for deposit (avoids version conflicts)');
-
-  // ✅ Call deposit with the split coin
+  // ✅ Call deposit with HACKATHON coin
   tx.moveCall({
     target: `${CONTRACTS.PACKAGE_ID}::outcome::deposit_funds`,
-    typeArguments: ['0x2::oct::OCT'],
+    typeArguments: ['0x8b76fc2a2317d45118770cefed7e57171a08c477ed16283616b15f099391f120::hackathon::HACKATHON'],
     arguments: [
       tx.object(marketId),
       tx.object(userBalanceId),
@@ -97,8 +94,6 @@ export function buildDepositWithCoin(
   return tx;
 }
 
-
-
 /**
  * ✅ CRITICAL FIX: Use place_order_cli which handles u8 for option
  * 
@@ -108,17 +103,6 @@ export function buildDepositWithCoin(
  *   - Integer: 20 (means 20%)
  * 
  * Both get converted to integer range [1, 99] for contract
- * 
- * Function signature:
- * public fun place_order_cli<CoinType>(
- *   orderbook: &mut OrderBook,
- *   market: &mut Market<CoinType>,
- *   userbalance: &mut UserBalance<CoinType>,
- *   option: u8,           ← 0 or 1
- *   price: u64,           ← Must be > 0 and < 100 (integers 1-99)
- *   quantity: u64,        ← Must be > 0
- *   isbid: bool           ← true for buy, false for sell
- * )
  */
 export async function buildPlaceOrderTransaction(
   userBalanceId: string,
@@ -129,9 +113,7 @@ export async function buildPlaceOrderTransaction(
 ): Promise<Transaction> {
   const tx = new Transaction();
 
-
   console.log('🚀 buildPlaceOrderTransaction called with:', { userBalanceId, option, price, quantity, isBuy });
-
 
   // ✅ VALIDATION: Catch invalid inputs early
   if (!userBalanceId) {
@@ -143,13 +125,10 @@ export async function buildPlaceOrderTransaction(
   }
   
   // ✅ FIXED: Handle both decimal (0.20) and integer (20) inputs
-  // User can type: 0.20 (means 20) OR 20 (means 20)
-  // Internally convert to integer range [1, 99]
   let priceForContract = price;
   
   console.log('📍 Step 1 - Raw price:', priceForContract);
   
-  // If price is between 0 and 1 (like 0.20), multiply by 100 to get 20
   if (priceForContract > 0 && priceForContract < 1) {
     priceForContract = priceForContract * 100;
     console.log('📍 Step 2 - Detected decimal, multiplied by 100:', priceForContract);
@@ -157,7 +136,6 @@ export async function buildPlaceOrderTransaction(
     console.log('📍 Step 2 - Not a decimal, keeping as:', priceForContract);
   }
   
-  // Now validate: must be between 1 and 99
   if (!Number.isFinite(priceForContract) || priceForContract <= 0 || priceForContract >= 100) {
     throw new Error(`❌ Price must be > 0 and < 100, got: ${price} (converts to: ${priceForContract})`);
   }
@@ -166,65 +144,36 @@ export async function buildPlaceOrderTransaction(
     throw new Error(`❌ Quantity must be > 0, got: ${quantity} (type: ${typeof quantity})`);
   }
 
-
-
   console.log('📊 Place order transaction:');
   console.log('  ✅ Validation passed!');
   console.log('  Orderbook:', CONTRACTS.ORDERBOOK_ID);
   console.log('  Market:', CONTRACTS.MARKET_ID);
   console.log('  UserBalance:', userBalanceId);
   console.log('  Option:', option === 0 ? 'Barca (0)' : 'Madrid (1)');
-  console.log('  User entered price:', price);
   console.log('  Price sent to contract:', priceForContract, '(range: 1-99)');
   console.log('  Quantity:', quantity);
-  console.log('  Side:', isBuy ? 'BUY' : 'SELL');
 
-
-
-  // ✅ FIXED: Convert to BigInt using the adjusted price
-  // If user typed 0.20, priceForContract is now 20
-  // If user typed 20, priceForContract is now 20
   const priceValue = BigInt(Math.round(priceForContract));
   const qty = BigInt(Math.round(quantity));
 
-
-  console.log('🔍 DEBUG - Final values going to contract:');
-  console.log('  priceValue (BigInt):', priceValue.toString());
-  console.log('  qty (BigInt):', qty.toString());
-  console.log('  Will be sent as: tx.pure.u64(' + priceValue.toString() + ')');
-
-
-  console.log('  Converted to BigInt:');
-  console.log('    Price:', priceValue.toString());
-  console.log('    Quantity:', qty.toString());
-
-
-
-  // ✅ Call place_order_cli which converts u8 to Option internally
   tx.moveCall({
     target: `${CONTRACTS.PACKAGE_ID}::orderbook::place_order_cli`,
-    typeArguments: ['0x2::oct::OCT'],
+    typeArguments: ['0x8b76fc2a2317d45118770cefed7e57171a08c477ed16283616b15f099391f120::hackathon::HACKATHON'],
     arguments: [
       tx.object(CONTRACTS.ORDERBOOK_ID),
       tx.object(CONTRACTS.MARKET_ID),
       tx.object(userBalanceId),
-      tx.pure.u8(option),      // ← u8: 0 or 1
-      tx.pure.u64(priceValue), // ← u64: integer 1-99 (matches CLI)
-      tx.pure.u64(qty),        // ← u64: > 0
-      tx.pure.bool(isBuy),     // ← bool: true/false
+      tx.pure.u8(option),
+      tx.pure.u64(priceValue),
+      tx.pure.u64(qty),
+      tx.pure.bool(isBuy),
     ],
   });
 
-
-
   tx.setGasBudget(500000000);
-
-
 
   return tx;
 }
-
-
 
 /**
  * ✅ Build cancel order transaction
@@ -235,15 +184,11 @@ export async function buildCancelOrderTransaction(
 ): Promise<Transaction> {
   const tx = new Transaction();
 
-
-
   const orderIdValue = BigInt(orderId);
-
-
 
   tx.moveCall({
     target: `${CONTRACTS.PACKAGE_ID}::orderbook::cancel_order`,
-    typeArguments: ['0x2::oct::OCT'],
+    typeArguments: ['0x8b76fc2a2317d45118770cefed7e57171a08c477ed16283616b15f099391f120::hackathon::HACKATHON'],
     arguments: [
       tx.object(CONTRACTS.ORDERBOOK_ID),
       tx.object(CONTRACTS.MARKET_ID),
@@ -252,16 +197,10 @@ export async function buildCancelOrderTransaction(
     ],
   });
 
-
-
   tx.setGasBudget(500000000);
-
-
 
   return tx;
 }
-
-
 
 export async function getTopBid(): Promise<number> {
   try {
@@ -272,8 +211,6 @@ export async function getTopBid(): Promise<number> {
   }
 }
 
-
-
 export async function getTopAsk(): Promise<number> {
   try {
     return 0;
@@ -282,8 +219,6 @@ export async function getTopAsk(): Promise<number> {
     return 0;
   }
 }
-
-
 
 export async function getOrderbookDepth(): Promise<[number, number]> {
   try {

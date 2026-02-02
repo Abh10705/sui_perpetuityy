@@ -66,7 +66,7 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
         const ownedObjects = await suiClient.getOwnedObjects({
           owner: currentAccount.address,
           filter: {
-            StructType: `${CONTRACTS.PACKAGE_ID}::outcome::UserBalance<0x2::oct::OCT>`
+            StructType: `${CONTRACTS.PACKAGE_ID}::outcome::UserBalance<0x8b76fc2a2317d45118770cefed7e57171a08c477ed16283616b15f099391f120::hackathon::HACKATHON>`
           },
           options: {
             showContent: true,
@@ -170,9 +170,9 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
 
       tx.moveCall({
         target: `${CONTRACTS.PACKAGE_ID}::outcome::create_user_balance`,
-        typeArguments: ['0x2::oct::OCT'],
+        typeArguments: ['0x8b76fc2a2317d45118770cefed7e57171a08c477ed16283616b15f099391f120::hackathon::HACKATHON'],
         arguments: [
-          tx.object(CONTRACTS.MARKET_ID),  // ✅ FIXED: No SharedObjectRef wrapper
+          tx.object(CONTRACTS.MARKET_ID),  //  No SharedObjectRef wrapper
           tx.pure.u64(1),
         ],
       });
@@ -308,7 +308,7 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
       // ✅ FIXED: Get ALL OCT coins, not just the first one
       const octCoins = await suiClient.getOwnedObjects({
         owner: currentAccount!.address!,
-        filter: { StructType: '0x2::coin::Coin<0x2::oct::OCT>' },
+        filter: { StructType: '0x2::coin::Coin<0x8b76fc2a2317d45118770cefed7e57171a08c477ed16283616b15f099391f120::hackathon::HACKATHON>' },
         options: { showContent: true }
       });
 
