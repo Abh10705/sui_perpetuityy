@@ -1,12 +1,13 @@
 [package]
-name = "perpetuity_sui"
+name = "perpetuity_one"
 edition = "2024.beta"
+version = "0.0.1"
 
 [dependencies]
 One = { git = "https://github.com/one-chain-labs/onechain.git", subdir = "crates/sui-framework/packages/one-framework", rev = "main" }
 
 [addresses]
-perpetuity_sui = "0x0"
+perpetuity_one = "0x0"
 
 [dev-dependencies]
 

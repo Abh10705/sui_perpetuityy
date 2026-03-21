@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
-import { suiClient } from '@/lib/sui/client';
+import { suiClient } from '@/lib/one/client';
 import { CONTRACTS } from '@/lib/constants';
-import { UserPosition } from '@/lib/sui/types';
+import { UserPosition } from '@/lib/one/types';
 
 interface TableFields {
   fields: {

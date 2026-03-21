@@ -1,13 +1,11 @@
-module perpetuity_sui::outcome {
+module perpetuity_one::outcome {
     use one::balance::{Self, Balance};
     use one::coin::{Self, Coin};
     use one::table::{Self, Table};
-    use perpetuity_sui::types::Option;
-    use perpetuity_sui::types::{option_a, option_b};
+    use perpetuity_one::types::Option;
+    use perpetuity_one::types::{option_a, option_b};
     
-    // ============================================================================
-    // Events (defined in outcome module)
-    // ============================================================================
+    
 
     public struct SharesTransferred has drop, copy {
         from: address,

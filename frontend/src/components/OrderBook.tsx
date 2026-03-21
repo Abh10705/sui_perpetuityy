@@ -2,7 +2,12 @@
 
 import { useOrderBook } from '@/hooks/useOrderBook';
 
-export function OrderBook() {
+interface OrderBookProps {
+  optionALabel: string;
+  optionBLabel: string;
+}
+
+export function OrderBook({ optionALabel, optionBLabel }: OrderBookProps) {
   const { orderbook, loading, error } = useOrderBook();
 
   if (loading) return <div className="card p-4">Loading orderbook...</div>;
@@ -22,9 +27,11 @@ export function OrderBook() {
 
       {/* 4-Quadrant Layout */}
       <div className="grid grid-cols-2 gap-4">
-        {/* TOP LEFT - Barca Bids */}
+        {/* TOP LEFT - Option A Bids */}
         <div className="card">
-          <h3 className="font-bold text-blue-400 mb-3">Barca Bids ({orderbook.barcaBids.length})</h3>
+          <h3 className="font-bold text-blue-400 mb-3">
+            {optionALabel} Bids ({orderbook.barcaBids.length})
+          </h3>
           <div className="space-y-2 text-sm">
             {orderbook.barcaBids.length > 0 ? (
               orderbook.barcaBids.map((bid) => (
@@ -39,9 +46,11 @@ export function OrderBook() {
           </div>
         </div>
 
-        {/* TOP RIGHT - Barca Asks */}
+        {/* TOP RIGHT - Option A Asks */}
         <div className="card">
-          <h3 className="font-bold text-blue-400 mb-3">Barca Asks ({orderbook.barcaAsks.length})</h3>
+          <h3 className="font-bold text-blue-400 mb-3">
+            {optionALabel} Asks ({orderbook.barcaAsks.length})
+          </h3>
           <div className="space-y-2 text-sm">
             {orderbook.barcaAsks.length > 0 ? (
               orderbook.barcaAsks.map((ask) => (
@@ -56,9 +65,11 @@ export function OrderBook() {
           </div>
         </div>
 
-        {/* BOTTOM LEFT - Madrid Bids */}
+        {/* BOTTOM LEFT - Option B Bids */}
         <div className="card">
-          <h3 className="font-bold text-red-400 mb-3">Madrid Bids ({orderbook.madridBids.length})</h3>
+          <h3 className="font-bold text-red-400 mb-3">
+            {optionBLabel} Bids ({orderbook.madridBids.length})
+          </h3>
           <div className="space-y-2 text-sm">
             {orderbook.madridBids.length > 0 ? (
               orderbook.madridBids.map((bid) => (
@@ -73,9 +84,11 @@ export function OrderBook() {
           </div>
         </div>
 
-        {/* BOTTOM RIGHT - Madrid Asks */}
+        {/* BOTTOM RIGHT - Option B Asks */}
         <div className="card">
-          <h3 className="font-bold text-red-400 mb-3">Madrid Asks ({orderbook.madridAsks.length})</h3>
+          <h3 className="font-bold text-red-400 mb-3">
+            {optionBLabel} Asks ({orderbook.madridAsks.length})
+          </h3>
           <div className="space-y-2 text-sm">
             {orderbook.madridAsks.length > 0 ? (
               orderbook.madridAsks.map((ask) => (

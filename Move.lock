@@ -2,7 +2,7 @@
 
 [move]
 version = 3
-manifest_digest = "45399963649F0291CDEE34DA313CF4C19F5C3AD88FF4107BDA0D6963640FF777"
+manifest_digest = "1B5BAD840995EDF83F0D77FB3416B3DD7127AB013E9DE7550F689C65ACD2A461"
 deps_digest = "F8BBB0CCB2491CA29A3DF03D6F92277A4F3574266507ACD77214D37ECA3F3082"
 dependencies = [
   { id = "One", name = "One" },
@@ -29,6 +29,6 @@ flavor = "one"
 
 [env.onechain-testnet]
 chain-id = "1bd5c965"
-original-published-id = "0x5c91319eba13f26ef17a708cd5bae1276c283795ba3e843962c6a1bfe0660210"
-latest-published-id = "0x5c91319eba13f26ef17a708cd5bae1276c283795ba3e843962c6a1bfe0660210"
+original-published-id = "0x02d18d1bf11479decbb49edaa3ab2e1b9f0950afa9e842b7a41008821c622f61"
+latest-published-id = "0x02d18d1bf11479decbb49edaa3ab2e1b9f0950afa9e842b7a41008821c622f61"
 published-version = "1"

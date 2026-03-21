@@ -6,17 +6,23 @@ import { OrderBook } from '@/components/OrderBook';
 import { TradingPanel } from '@/components/TradingPanel';
 import { UserPosition } from '@/components/UserPosition';
 import { MatchingDebug } from '@/components/MatchingDebug';
-
+import { MARKETS } from '@/lib/constants';
+import { useOrderBook } from '@/hooks/useOrderBook';
 // Dynamically import ConnectButton to avoid hydration mismatch
 const ConnectButton = dynamic(
-  () => import('@mysten/dapp-kit').then(mod => ({ default: mod.ConnectButton })),
+  () => import('@mysten/dapp-kit').then((mod) => ({ default: mod.ConnectButton })),
   { ssr: false }
 );
 
 export default function MarketPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  const market = MARKETS.find((m) => m.id === id) ?? MARKETS[0];
+
   const [userBalance, setUserBalance] = useState<string | null>(null);
-  const [selectedTeam, setSelectedTeam] = useState<'barca' | 'madrid'>('barca');
+  const [selectedTeam, setSelectedTeam] = useState<'A' | 'B'>('A');
+  
+  const { orderbook } = useOrderBook();
+  const recentTrades = orderbook?.recentTrades ?? [];
 
   return (
     <div className="min-h-screen bg-black">
@@ -25,32 +31,32 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex flex-col items-start justify-between gap-4 md:flex-row md:items-center mb-6">
             <div>
-              <h1 className="text-4xl font-bold text-white">Which team is better? Barca or Madrid</h1>
+              <h1 className="text-4xl font-bold text-white">{market.title}</h1>
               <p className="mt-2 text-gray-400">Market ID: {id}</p>
             </div>
             <ConnectButton />
           </div>
 
           <div className="flex gap-3">
-            <button 
-              onClick={() => setSelectedTeam('barca')}
+            <button
+              onClick={() => setSelectedTeam('A')}
               className={`px-4 py-2 rounded-lg transition-all ${
-                selectedTeam === 'barca'
+                selectedTeam === 'A'
                   ? 'border-2 border-blue-500 bg-blue-500/10 text-blue-400'
                   : 'border border-gray-600 bg-gray-800 text-white hover:border-gray-500'
               }`}
             >
-              Barca
+              {market.optionALabel}
             </button>
-            <button 
-              onClick={() => setSelectedTeam('madrid')}
+            <button
+              onClick={() => setSelectedTeam('B')}
               className={`px-4 py-2 rounded-lg transition-all ${
-                selectedTeam === 'madrid'
+                selectedTeam === 'B'
                   ? 'border-2 border-white bg-white/10 text-white'
                   : 'border border-gray-600 bg-gray-800 text-white hover:border-gray-500'
               }`}
             >
-              Madrid
+              {market.optionBLabel}
             </button>
           </div>
         </div>
@@ -61,15 +67,20 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
         <div className="grid gap-8 lg:grid-cols-3">
           {/* OrderBook - Takes 2 columns on large screens */}
           <div className="lg:col-span-2">
-            <OrderBook />
+            <OrderBook 
+              optionALabel={market.optionALabel}
+              optionBLabel={market.optionBLabel}
+            />
           </div>
 
           {/* Trading Panel + User Position - 1 column */}
           <div className="space-y-4">
-            <TradingPanel 
-              userBalance={userBalance} 
+            <TradingPanel
+              userBalance={userBalance}
               onBalanceChange={setUserBalance}
               selectedTeam={selectedTeam}
+              optionALabel={market.optionALabel}
+              optionBLabel={market.optionBLabel}
             />
 
             <UserPosition userBalanceId={userBalance} />
@@ -84,14 +95,14 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
           {/* Volume */}
           <div className="rounded-lg border border-gray-700 bg-gray-900 p-6">
             <h4 className="mb-2 text-sm text-gray-400">24h Volume</h4>
-            <p className="text-3xl font-bold text-white">2,450 SUI</p>
+            <p className="text-3xl font-bold text-white">2,450 One</p>
             <p className="mt-2 text-xs text-green-400">+12.5% from yesterday</p>
           </div>
 
           {/* Spread */}
           <div className="rounded-lg border border-gray-700 bg-gray-900 p-6">
             <h4 className="mb-2 text-sm text-gray-400">Bid-Ask Spread</h4>
-            <p className="text-3xl font-bold text-white">0.01 SUI</p>
+            <p className="text-3xl font-bold text-white">0.01 One</p>
             <p className="mt-2 text-xs text-gray-400">~0.02% of price</p>
           </div>
 
@@ -118,7 +129,29 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
 
               {/* Empty state */}
               <div className="py-8 text-center text-gray-500">
-                No trades yet. Be the first to trade!
+                {recentTrades.length === 0 ? (
+                  <div className="py-8 text-center text-gray-500">
+                    No trades yet. Be the first to trade!
+                  </div>
+                ) : (
+                  <div className="space-y-1 text-sm">
+                    {recentTrades.map((t) => (
+                      <div
+                        key={t.order_id}
+                        className="grid grid-cols-4 gap-4 py-1 border-b border-gray-800 last:border-b-0"
+                      >
+                        <div>${t.price.toFixed(2)}</div>
+                        <div>{t.filled_quantity}</div>
+                        <div className={t.is_bid ? 'text-green-400' : 'text-red-400'}>
+                          {t.is_bid ? 'BUY' : 'SELL'}
+                        </div>
+                        <div className="text-gray-500">
+                          ...{t.order_id.slice(-6)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -130,7 +163,7 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
           <div className="grid gap-4 md:grid-cols-2">
             <div className="rounded-lg border border-gray-700 bg-gray-900 p-4">
               <h4 className="text-sm text-gray-400">Question</h4>
-              <p className="mt-2 text-white">Which team is better? Barca or Madrid</p>
+              <p className="mt-2 text-white">{market.title}</p>
             </div>
             <div className="rounded-lg border border-gray-700 bg-gray-900 p-4">
               <h4 className="text-sm text-gray-400">Status</h4>
@@ -141,11 +174,11 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
             </div>
             <div className="rounded-lg border border-gray-700 bg-gray-900 p-4">
               <h4 className="text-sm text-gray-400">Resolution Date</h4>
-              <p className="mt-2 text-white">TBD</p>
+              <p className="mt-2 text-white">NEVER</p>
             </div>
             <div className="rounded-lg border border-gray-700 bg-gray-900 p-4">
               <h4 className="text-sm text-gray-400">Total Volume</h4>
-              <p className="mt-2 text-white">12,500 SUI</p>
+              <p className="mt-2 text-white">12,500 One</p>
             </div>
           </div>
         </div>

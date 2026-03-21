@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { suiClient } from '@/lib/sui/client';
+import { suiClient } from '@/lib/one/client';
 import { CONTRACTS } from '@/lib/constants';
-import { Order, OrderBookData } from '@/lib/sui/types';
+import { Order, OrderBookData } from '@/lib/one/types';
 
 interface TableFields {
   fields: {
@@ -129,11 +129,15 @@ export function useOrderBook() {
               
 
             if (isBid) {
-              bidsData.push(order);
-              topBid = Math.max(topBid, price);
+              if (filled_quantity < quantity) {
+                bidsData.push(order);
+                topBid = Math.max(topBid, price);
+              }
             } else {
-              asksData.push(order);
-              topAsk = Math.min(topAsk, price);
+              if (filled_quantity < quantity) {  
+                asksData.push(order);
+                topAsk = Math.min(topAsk, price);
+              }
             }
           }
         } catch (err) {
@@ -148,6 +152,9 @@ export function useOrderBook() {
       const barcaAsks = asksData.filter(ask => ask.option === 'OptionA');
       const madridBids = bidsData.filter(bid => bid.option === 'OptionB');
       const madridAsks = asksData.filter(ask => ask.option === 'OptionB');
+      const allOrders = [...bidsData, ...asksData];
+      const filledOrders = allOrders.filter(o => o.filled_quantity > 0);
+      const recentTrades = filledOrders.slice(-10).reverse();
 
 
       setOrderbook({
@@ -161,6 +168,7 @@ export function useOrderBook() {
         barcaAsks,
         madridBids,
         madridAsks,
+        recentTrades,
       });
 
       console.log('📈 Final OrderBook:', { 

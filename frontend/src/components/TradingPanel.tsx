@@ -7,9 +7,9 @@ import { Transaction } from '@mysten/sui/transactions';
 import { SuiObjectChange } from '@mysten/sui/client';
 import { CONTRACTS } from '@/lib/constants';
 // ✅ FIXED: Import from your ONE chain client, not useSuiClient hook
-import { suiClient } from '@/lib/sui/client';
+import { suiClient } from '@/lib/one/client';
 // ✅ FIXED: Removed getSharedObjectRef (no longer needed)
-import { buildDepositWithCoin, buildPlaceOrderTransaction } from '@/lib/sui/contracts';
+import { buildDepositWithCoin, buildPlaceOrderTransaction } from '@/lib/one/contracts';
 
 
 interface TxResult {
@@ -21,7 +21,9 @@ interface TxResult {
 interface TradingPanelProps {
   userBalance: string | null; 
   onBalanceChange: (id: string) => void;
-  selectedTeam: 'barca' | 'madrid';
+  selectedTeam: 'A' | 'B';
+  optionALabel: string;
+  optionBLabel: string;
 }
 
 
@@ -30,7 +32,7 @@ interface ErrorWithCode extends Error {
 }
 
 
-export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: TradingPanelProps) {
+export function TradingPanel({ userBalance, onBalanceChange, selectedTeam, optionALabel, optionBLabel }: TradingPanelProps) {
   const [depositAmount, setDepositAmount] = useState('');
   const [side, setSide] = useState<'buy' | 'sell'>('buy');
   const [price, setPrice] = useState('');
@@ -418,7 +420,7 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
       // ✅ Use the builder function (no suiClient parameter needed)
       const tx = await buildPlaceOrderTransaction(
         userBalance,
-        selectedTeam === 'barca' ? 0 : 1,
+        selectedTeam === 'A' ? 0 : 1,
         parseFloat(price),
         parseFloat(quantity),
         side === 'buy'
@@ -647,7 +649,7 @@ export function TradingPanel({ userBalance, onBalanceChange, selectedTeam }: Tra
               : 'bg-red-500 hover:bg-red-600 disabled:bg-gray-600'
           } text-white disabled:text-gray-400 disabled:cursor-not-allowed transition-all`}
         >
-          {loading ? 'Processing...' : `${side === 'buy' ? 'Buy' : 'Sell'} ${quantity || '0'} ${selectedTeam === 'barca' ? 'Barca' : 'Madrid'} @ ${price || '0.00'}`}
+          {loading ? 'Processing...' : `${side === 'buy' ? 'Buy' : 'Sell'} ${quantity || '0'} ${selectedTeam === 'A' ? optionALabel : optionBLabel} @ ${price || '0.00'}`}
         </button>
       )}
     </div>

@@ -21,6 +21,7 @@ export interface OrderBookData {
   barcaAsks: Order[];
   madridBids: Order[];
   madridAsks: Order[];
+  recentTrades: Order[];
 }
 
 
