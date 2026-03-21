@@ -1,6 +1,6 @@
 import { Transaction } from '@mysten/sui/transactions';
 import { CONTRACTS } from '@/lib/constants';
-import { suiClient } from '@/lib/sui/client';
+
 
 export interface PlaceOrderResult {
   success: boolean;
