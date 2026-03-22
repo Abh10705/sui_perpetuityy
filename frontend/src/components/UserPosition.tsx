@@ -47,7 +47,7 @@ export function UserPosition({ userBalanceId }: UserPositionProps) {
       <div className="mb-4 rounded-lg bg-gray-800 p-4">
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-sm text-gray-400">{CONTRACTS.OPTION_A}</p>
+            <p className="text-sm text-gray-400">{CONTRACTS.OPTION_A_LABEL}</p>
             <p className="text-2xl font-bold text-green-400">
               {formatShares(barcarShares)}
             </p>
@@ -66,7 +66,7 @@ export function UserPosition({ userBalanceId }: UserPositionProps) {
       <div className="mb-4 rounded-lg bg-gray-800 p-4">
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-sm text-gray-400">{CONTRACTS.OPTION_B}</p>
+            <p className="text-sm text-gray-400">{CONTRACTS.OPTION_B_LABEL}</p>
             <p className="text-2xl font-bold text-red-400">
               {formatShares(madridShares)}
             </p>

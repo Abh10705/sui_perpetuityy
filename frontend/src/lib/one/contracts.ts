@@ -8,9 +8,7 @@ export interface PlaceOrderResult {
   error?: string;
 }
 
-/**
- * ✅ Create user balance
- */
+
 export async function createUserBalance(): Promise<PlaceOrderResult> {
   try {
     const tx = new Transaction();
@@ -24,7 +22,7 @@ export async function createUserBalance(): Promise<PlaceOrderResult> {
       ],
     });
 
-    console.log('✅ Transaction built for create_user_balance');
+    console.log('Transaction built for create_user_balance');
     
     return {
       success: true,
@@ -38,12 +36,7 @@ export async function createUserBalance(): Promise<PlaceOrderResult> {
   }
 }
 
-/**
- * ✅ FIXED: Build deposit transaction using ACTUAL HACKATHON coins
- * 
- * CRITICAL: Cannot use tx.gas because gas is OCT/ONE, not HACKATHON!
- * Must use actual HACKATHON coin objects from wallet.
- */
+
 export function buildDepositWithCoin(
   marketId: string,
   userBalanceId: string,
@@ -52,7 +45,7 @@ export function buildDepositWithCoin(
 ): Transaction {
   const tx = new Transaction();
 
-  console.log('📤 Deposit transaction:');
+  console.log(' Deposit transaction:');
   console.log('  UserBalance:', userBalanceId);
   console.log('  Amount:', amount, 'HACKATHON');
   console.log('  Available HACKATHON coins:', hackathonCoinIds.length);
@@ -64,7 +57,7 @@ export function buildDepositWithCoin(
   const amountMist = BigInt(Math.floor(amount * 1e9));
   console.log('  Amount Mist:', amountMist.toString());
 
-  // ✅ Use actual HACKATHON coins (NOT gas coin!)
+
   const baseCoin = tx.object(hackathonCoinIds[0]);
   
   // Merge all HACKATHON coins if user has multiple
