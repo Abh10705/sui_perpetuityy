@@ -16,12 +16,11 @@ export interface OrderBookData {
   askDepth: number;
   bids: Order[];
   asks: Order[];
-  // New fields for separated Barca/Madrid
   barcaBids: Order[];
   barcaAsks: Order[];
   madridBids: Order[];
   madridAsks: Order[];
-  recentTrades: Order[];
+  recentTrades: TradeEvent[]; // <-- Change this from Order[] to TradeEvent[]
 }
 
 
@@ -40,3 +39,12 @@ export interface UserPosition {
   error: string | null;
 }
 
+export interface TradeEvent {
+  id: string;
+  txDigest: string;
+  price: number;
+  quantity: number;
+  option: string;
+  timestamp: number;
+  type: string;
+}

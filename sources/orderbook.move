@@ -364,35 +364,7 @@ module perpetuity_one::orderbook {
     // ============================================================================
     // Automatic Order Matching
     // ============================================================================
-        fun is_better_price_time(
-            orders: &Table<u64, Order>,
-            a_id: u64,
-            b_id: u64,
-            ascending: bool,
-        ): bool {
-            let a = table::borrow(orders, a_id);
-            let b = table::borrow(orders, b_id);
 
-            if (ascending) {
-                // Lower price first, then older first
-                if (a.price < b.price) {
-                    true
-                } else if (a.price > b.price) {
-                    false
-                } else {
-                    a.created_at < b.created_at
-                }
-            } else {
-                // Higher price first, then older first
-                if (a.price > b.price) {
-                    true
-                } else if (a.price < b.price) {
-                    false
-                } else {
-                    a.created_at < b.created_at
-                }
-            }
-        }
 
     fun auto_match_orders<CoinType>(
         orderbook: &mut OrderBook,
@@ -405,524 +377,372 @@ module perpetuity_one::orderbook {
             let order = table::borrow(&orderbook.orders, new_order_id);
             order.price
         };
-
         let new_order_option = {
             let order = table::borrow(&orderbook.orders, new_order_id);
             order.option
         };
+        let mut keep_matching = true;
 
-                // Phase 1: Match same-option orders with best-price-first (multi-price sweep)
+        // ============================================================================
+        // Phase 1: Match same-option orders using strict Price Level Scanning
+        // ============================================================================
         if (is_bid) {
-            // Build candidate list of asks: same option, price <= new_order_price
-            let mut candidates = vector::empty<u64>();
-            let ask_len = vector::length(&orderbook.ask_ids);
-            let mut i = 0;
-            while (i < ask_len) {
-                let ask_id = *vector::borrow(&orderbook.ask_ids, i);
-                if (table::contains(&orderbook.active_orders, ask_id)) {
-                    let ask = table::borrow(&orderbook.orders, ask_id);
-                    if (ask.option == new_order_option && ask.price <= new_order_price) {
-                        vector::push_back(&mut candidates, ask_id);
+            // BUY ORDER: Scan asks starting from the lowest price (1) up to the buy limit price.
+            let mut current_price = 1;
+            while (current_price <= new_order_price && keep_matching) {
+                if (table::contains(&orderbook.ask_levels, current_price)) {
+                    let level_ids = *table::borrow(&orderbook.ask_levels, current_price);
+                    let len = vector::length(&level_ids);
+                    let mut idx = 0;
+                    
+                    while (idx < len && keep_matching) {
+                        let ask_order_id = *vector::borrow(&level_ids, idx);
+                        
+                        if (!table::contains(&orderbook.active_orders, ask_order_id)) {
+                            idx = idx + 1; continue;
+                        };
+
+                        let (ask_option, ask_qty, ask_filled) = {
+                            let ask = table::borrow(&orderbook.orders, ask_order_id);
+                            (ask.option, ask.quantity, ask.filled_quantity)
+                        };
+
+                        if (ask_option != new_order_option) {
+                            idx = idx + 1; continue;
+                        };
+
+                        let ask_remaining = ask_qty - ask_filled;
+                        if (ask_remaining == 0) {
+                            idx = idx + 1; continue;
+                        };
+
+                        let new_remaining = {
+                            let new_ord = table::borrow(&orderbook.orders, new_order_id);
+                            new_ord.quantity - new_ord.filled_quantity
+                        };
+
+                        if (new_remaining == 0) {
+                            keep_matching = false; break;
+                        };
+
+                        let match_qty = if (new_remaining < ask_remaining) { new_remaining } else { ask_remaining };
+
+                        // Update quantities
+                        {
+                            let new_ord = table::borrow_mut(&mut orderbook.orders, new_order_id);
+                            new_ord.filled_quantity = new_ord.filled_quantity + match_qty;
+                        };
+                        {
+                            let ask_ord = table::borrow_mut(&mut orderbook.orders, ask_order_id);
+                            ask_ord.filled_quantity = ask_ord.filled_quantity + match_qty;
+                            if (ask_ord.filled_quantity == ask_ord.quantity) {
+                                table::remove(&mut orderbook.active_orders, ask_order_id);
+                            };
+                        };
+
+                        let buyer_addr = { let o = table::borrow(&orderbook.orders, new_order_id); o.trader };
+                        let seller_addr = { let o = table::borrow(&orderbook.orders, ask_order_id); o.trader };
+
+                        transfer_shares(market, seller_addr, buyer_addr, new_order_option, match_qty, ctx);
+                        
+                        let payment_amount = current_price * match_qty; // Executed at Maker's price
+                        settle_trade_immediate(market, seller_addr, payment_amount, ctx);
+
+                        one::event::emit(AutoMatched {
+                            buyer_order_id: new_order_id,
+                            seller_order_id: ask_order_id,
+                            price: current_price, 
+                            quantity: match_qty,
+                            market_id: orderbook.market_id,
+                            option: new_order_option,
+                        });
+
+                        let check_new_rem = {
+                            let new_ord = table::borrow(&orderbook.orders, new_order_id);
+                            new_ord.quantity - new_ord.filled_quantity
+                        };
+                        if (check_new_rem == 0) {
+                            keep_matching = false; break;
+                        };
+
+                        idx = idx + 1;
                     };
                 };
-                i = i + 1;
-            };
-
-            // Sort candidates by lowest price first, then oldest
-            let mut n = vector::length(&candidates);
-            let mut outer = 0;
-            while (outer < n) {
-                let mut inner = 0;
-                while (inner + 1 < n) {
-                    let a_id = *vector::borrow(&candidates, inner);
-                    let b_id = *vector::borrow(&candidates, inner + 1);
-                    if (!is_better_price_time(&orderbook.orders, a_id, b_id, /* ascending = */ true)) {
-                        let tmp = a_id;
-                        *vector::borrow_mut(&mut candidates, inner) = b_id;
-                        *vector::borrow_mut(&mut candidates, inner + 1) = tmp;
-                    };
-                    inner = inner + 1;
-                };
-                outer = outer + 1;
-            };
-
-            // Sweep through sorted asks
-            let mut idx = 0;
-            let mut keep_matching = true;
-            while (idx < n && keep_matching) {
-                let ask_order_id = *vector::borrow(&candidates, idx);
-
-                if (!table::contains(&orderbook.active_orders, ask_order_id)) {
-                    idx = idx + 1;
-                    continue;
-                };
-
-                let new_order_remaining = {
-                    let order = table::borrow(&orderbook.orders, new_order_id);
-                    order.quantity - order.filled_quantity
-                };
-
-                if (new_order_remaining == 0) {
-                    keep_matching = false;
-                    break;
-                };
-
-                let ask_order_remaining = {
-                    let order = table::borrow(&orderbook.orders, ask_order_id);
-                    order.quantity - order.filled_quantity
-                };
-
-                if (ask_order_remaining == 0) {
-                    idx = idx + 1;
-                    continue;
-                };
-
-                let match_qty = if (new_order_remaining < ask_order_remaining) {
-                    new_order_remaining
-                } else {
-                    ask_order_remaining
-                };
-
-                {
-                    let new_order = table::borrow_mut(&mut orderbook.orders, new_order_id);
-                    new_order.filled_quantity = new_order.filled_quantity + match_qty;
-                };
-
-                {
-                    let ask_order = table::borrow_mut(&mut orderbook.orders, ask_order_id);
-                    ask_order.filled_quantity = ask_order.filled_quantity + match_qty;
-                };
-
-                {
-                    let ask_order = table::borrow(&orderbook.orders, ask_order_id);
-                    if (ask_order.filled_quantity == ask_order.quantity) {
-                        table::remove(&mut orderbook.active_orders, ask_order_id);
-                    };
-                };
-
-                let buyer_addr = {
-                    let order = table::borrow(&orderbook.orders, new_order_id);
-                    order.trader
-                };
-
-                let seller_addr = {
-                    let order = table::borrow(&orderbook.orders, ask_order_id);
-                    order.trader
-                };
-
-                transfer_shares(market, seller_addr, buyer_addr, new_order_option, match_qty, ctx);
-
-                let payment_amount = new_order_price * match_qty;
-                settle_trade_immediate(market, seller_addr, payment_amount, ctx);
-
-                one::event::emit(AutoMatched {
-                    buyer_order_id: new_order_id,
-                    seller_order_id: ask_order_id,
-                    price: new_order_price,
-                    quantity: match_qty,
-                    market_id: orderbook.market_id,
-                    option: new_order_option,
-                });
-
-                let new_remaining = {
-                    let order = table::borrow(&orderbook.orders, new_order_id);
-                    order.quantity - order.filled_quantity
-                };
-                if (new_remaining == 0) {
-                    keep_matching = false;
-                    break;
-                };
-
-                idx = idx + 1;
+                current_price = current_price + 1;
             };
 
         } else {
-            // New order is a SELL: match with bids at highest price first
-            let mut candidates = vector::empty<u64>();
-            let bid_len = vector::length(&orderbook.bid_ids);
-            let mut i = 0;
-            while (i < bid_len) {
-                let bid_id = *vector::borrow(&orderbook.bid_ids, i);
-                if (table::contains(&orderbook.active_orders, bid_id)) {
-                    let bid = table::borrow(&orderbook.orders, bid_id);
-                    if (bid.option == new_order_option && bid.price >= new_order_price) {
-                        vector::push_back(&mut candidates, bid_id);
+            // SELL ORDER: Scan bids starting from highest price (99) down to sell limit price.
+            let mut current_price = 99;
+            while (current_price >= new_order_price && keep_matching) {
+                if (table::contains(&orderbook.bid_levels, current_price)) {
+                    let level_ids = *table::borrow(&orderbook.bid_levels, current_price);
+                    let len = vector::length(&level_ids);
+                    let mut idx = 0;
+                    
+                    while (idx < len && keep_matching) {
+                        let bid_order_id = *vector::borrow(&level_ids, idx);
+                        
+                        if (!table::contains(&orderbook.active_orders, bid_order_id)) {
+                            idx = idx + 1; continue;
+                        };
+
+                        let (bid_option, bid_qty, bid_filled) = {
+                            let bid = table::borrow(&orderbook.orders, bid_order_id);
+                            (bid.option, bid.quantity, bid.filled_quantity)
+                        };
+
+                        if (bid_option != new_order_option) {
+                            idx = idx + 1; continue;
+                        };
+
+                        let bid_remaining = bid_qty - bid_filled;
+                        if (bid_remaining == 0) {
+                            idx = idx + 1; continue;
+                        };
+
+                        let new_remaining = {
+                            let new_ord = table::borrow(&orderbook.orders, new_order_id);
+                            new_ord.quantity - new_ord.filled_quantity
+                        };
+
+                        if (new_remaining == 0) {
+                            keep_matching = false; break;
+                        };
+
+                        let match_qty = if (new_remaining < bid_remaining) { new_remaining } else { bid_remaining };
+
+                        // Update quantities
+                        {
+                            let new_ord = table::borrow_mut(&mut orderbook.orders, new_order_id);
+                            new_ord.filled_quantity = new_ord.filled_quantity + match_qty;
+                        };
+                        {
+                            let bid_ord = table::borrow_mut(&mut orderbook.orders, bid_order_id);
+                            bid_ord.filled_quantity = bid_ord.filled_quantity + match_qty;
+                            if (bid_ord.filled_quantity == bid_ord.quantity) {
+                                table::remove(&mut orderbook.active_orders, bid_order_id);
+                            };
+                        };
+
+                        let buyer_addr = { let o = table::borrow(&orderbook.orders, bid_order_id); o.trader };
+                        let seller_addr = { let o = table::borrow(&orderbook.orders, new_order_id); o.trader };
+
+                        transfer_shares(market, seller_addr, buyer_addr, new_order_option, match_qty, ctx);
+
+                        let payment_amount = current_price * match_qty; // Executed at Maker's price
+                        settle_trade_immediate(market, seller_addr, payment_amount, ctx);
+
+                        one::event::emit(AutoMatched {
+                            buyer_order_id: bid_order_id,
+                            seller_order_id: new_order_id,
+                            price: current_price,
+                            quantity: match_qty,
+                            market_id: orderbook.market_id,
+                            option: new_order_option,
+                        });
+
+                        let check_new_rem = {
+                            let new_ord = table::borrow(&orderbook.orders, new_order_id);
+                            new_ord.quantity - new_ord.filled_quantity
+                        };
+                        if (check_new_rem == 0) {
+                            keep_matching = false; break;
+                        };
+
+                        idx = idx + 1;
                     };
                 };
-                i = i + 1;
-            };
-
-            // Sort candidates by highest price first, then oldest
-            let mut n = vector::length(&candidates);
-            let mut outer = 0;
-            while (outer < n) {
-                let mut inner = 0;
-                while (inner + 1 < n) {
-                    let a_id = *vector::borrow(&candidates, inner);
-                    let b_id = *vector::borrow(&candidates, inner + 1);
-                    if (!is_better_price_time(&orderbook.orders, a_id, b_id, /* ascending = */ false)) {
-                        let tmp = a_id;
-                        *vector::borrow_mut(&mut candidates, inner) = b_id;
-                        *vector::borrow_mut(&mut candidates, inner + 1) = tmp;
-                    };
-                    inner = inner + 1;
-                };
-                outer = outer + 1;
-            };
-
-            // Sweep through sorted bids
-            let mut idx = 0;
-            let mut keep_matching = true;
-            while (idx < n && keep_matching) {
-                let bid_order_id = *vector::borrow(&candidates, idx);
-
-                if (!table::contains(&orderbook.active_orders, bid_order_id)) {
-                    idx = idx + 1;
-                    continue;
-                };
-
-                let new_order_remaining = {
-                    let order = table::borrow(&orderbook.orders, new_order_id);
-                    order.quantity - order.filled_quantity
-                };
-
-                if (new_order_remaining == 0) {
-                    keep_matching = false;
-                    break;
-                };
-
-                let bid_order_remaining = {
-                    let order = table::borrow(&orderbook.orders, bid_order_id);
-                    order.quantity - order.filled_quantity
-                };
-
-                if (bid_order_remaining == 0) {
-                    idx = idx + 1;
-                    continue;
-                };
-
-                let match_qty = if (new_order_remaining < bid_order_remaining) {
-                    new_order_remaining
-                } else {
-                    bid_order_remaining
-                };
-
-                {
-                    let new_order = table::borrow_mut(&mut orderbook.orders, new_order_id);
-                    new_order.filled_quantity = new_order.filled_quantity + match_qty;
-                };
-
-                {
-                    let bid_order = table::borrow_mut(&mut orderbook.orders, bid_order_id);
-                    bid_order.filled_quantity = bid_order.filled_quantity + match_qty;
-                };
-
-                {
-                    let bid_order = table::borrow(&orderbook.orders, bid_order_id);
-                    if (bid_order.filled_quantity == bid_order.quantity) {
-                        table::remove(&mut orderbook.active_orders, bid_order_id);
-                    };
-                };
-
-                let buyer_addr = {
-                    let order = table::borrow(&orderbook.orders, bid_order_id);
-                    order.trader
-                };
-
-                let seller_addr = {
-                    let order = table::borrow(&orderbook.orders, new_order_id);
-                    order.trader
-                };
-
-                transfer_shares(market, seller_addr, buyer_addr, new_order_option, match_qty, ctx);
-
-                //let payment_amount = bid_order_remaining * new_order_price;
-                let payment_amount = {
-                    let bid = table::borrow(&orderbook.orders, bid_order_id);
-                    bid.price * match_qty };
-                               
-                
-                settle_trade_immediate(market, seller_addr, payment_amount, ctx);
-                one::event::emit(AutoMatched {
-                    buyer_order_id: bid_order_id,
-                    seller_order_id: new_order_id,
-                    price: new_order_price,
-                    quantity: match_qty,
-                    market_id: orderbook.market_id,
-                    option: new_order_option,
-                });
-
-                let new_remaining = {
-                    let order = table::borrow(&orderbook.orders, new_order_id);
-                    order.quantity - order.filled_quantity
-                };
-                if (new_remaining == 0) {
-                    keep_matching = false;
-                    break;
-                };
-
-                idx = idx + 1;
+                if (current_price == 1) { break }; // Prevent u64 underflow
+                current_price = current_price - 1;
             };
         };
 
-
-                // Phase 2: Cross-asset (complementary) matching for remaining quantity (best-price-first)
-        let new_order_remaining = {
+        // ============================================================================
+        // Phase 2: Cross-Asset Matching (Complementary)
+        // ============================================================================
+        let new_order_remaining_phase2 = {
             let order = table::borrow(&orderbook.orders, new_order_id);
             order.quantity - order.filled_quantity
         };
 
-        if (new_order_remaining > 0) {
-            let complementary_option = get_complementary_option(new_order_option);
-            let complementary_price = get_complementary_price(new_order_price);
+        if (new_order_remaining_phase2 > 0) {
+            let comp_option = get_complementary_option(new_order_option);
+            let comp_price_limit = get_complementary_price(new_order_price);
 
             if (is_bid) {
-                // New order is BID on new_option; match against ASKs on complementary_option
-                let mut candidates = vector::empty<u64>();
-                let ask_len = vector::length(&orderbook.ask_ids);
-                let mut i = 0;
-                while (i < ask_len) {
-                    let ask_id = *vector::borrow(&orderbook.ask_ids, i);
-                    if (table::contains(&orderbook.active_orders, ask_id)) {
-                        let ask = table::borrow(&orderbook.orders, ask_id);
-                        if (ask.option == complementary_option && ask.price <= complementary_price) {
-                            vector::push_back(&mut candidates, ask_id);
+                // CROSS BUY: Scan complementary asks from 1 up to comp_price_limit
+                let mut current_price = 1;
+                while (current_price <= comp_price_limit && keep_matching) {
+                    if (table::contains(&orderbook.ask_levels, current_price)) {
+                        let level_ids = *table::borrow(&orderbook.ask_levels, current_price);
+                        let len = vector::length(&level_ids);
+                        let mut idx = 0;
+
+                        while (idx < len && keep_matching) {
+                            let ask_order_id = *vector::borrow(&level_ids, idx);
+                            
+                            if (!table::contains(&orderbook.active_orders, ask_order_id)) {
+                                idx = idx + 1; continue;
+                            };
+
+                            let (ask_option, ask_qty, ask_filled) = {
+                                let ask = table::borrow(&orderbook.orders, ask_order_id);
+                                (ask.option, ask.quantity, ask.filled_quantity)
+                            };
+
+                            if (ask_option != comp_option) {
+                                idx = idx + 1; continue;
+                            };
+
+                            let ask_remaining = ask_qty - ask_filled;
+                            if (ask_remaining == 0) {
+                                idx = idx + 1; continue;
+                            };
+
+                            let new_remaining = {
+                                let new_ord = table::borrow(&orderbook.orders, new_order_id);
+                                new_ord.quantity - new_ord.filled_quantity
+                            };
+
+                            if (new_remaining == 0) {
+                                keep_matching = false; break;
+                            };
+
+                            let match_qty = if (new_remaining < ask_remaining) { new_remaining } else { ask_remaining };
+
+                            // Update quantities
+                            {
+                                let new_ord = table::borrow_mut(&mut orderbook.orders, new_order_id);
+                                new_ord.filled_quantity = new_ord.filled_quantity + match_qty;
+                            };
+                            {
+                                let ask_ord = table::borrow_mut(&mut orderbook.orders, ask_order_id);
+                                ask_ord.filled_quantity = ask_ord.filled_quantity + match_qty;
+                                if (ask_ord.filled_quantity == ask_ord.quantity) {
+                                    table::remove(&mut orderbook.active_orders, ask_order_id);
+                                };
+                            };
+
+                            let buyer_addr = { let o = table::borrow(&orderbook.orders, new_order_id); o.trader };
+                            let seller_addr = { let o = table::borrow(&orderbook.orders, ask_order_id); o.trader };
+
+                            transfer_shares(market, seller_addr, buyer_addr, comp_option, match_qty, ctx);
+                            
+                            let payment_amount = current_price * match_qty;
+                            settle_trade_immediate(market, seller_addr, payment_amount, ctx);
+
+                            one::event::emit(CrossAssetMatched {
+                                bid_order_id: new_order_id,
+                                ask_order_id: ask_order_id,
+                                price_a: get_complementary_price(current_price),
+                                price_b: current_price,
+                                quantity: match_qty,
+                                market_id: orderbook.market_id,
+                                bid_option: new_order_option,
+                                ask_option: comp_option,
+                            });
+
+                            let check_new_rem = {
+                                let new_ord = table::borrow(&orderbook.orders, new_order_id);
+                                new_ord.quantity - new_ord.filled_quantity
+                            };
+                            if (check_new_rem == 0) {
+                                keep_matching = false; break;
+                            };
+
+                            idx = idx + 1;
                         };
                     };
-                    i = i + 1;
-                };
-
-                // Sort by lowest price first, then oldest
-                let n = vector::length(&candidates);
-                let mut outer = 0;
-                while (outer < n) {
-                    let mut inner = 0;
-                    while (inner + 1 < n) {
-                        let a_id = *vector::borrow(&candidates, inner);
-                        let b_id = *vector::borrow(&candidates, inner + 1);
-                        if (!is_better_price_time(&orderbook.orders, a_id, b_id, /* ascending = */ true)) {
-                            let tmp = a_id;
-                            *vector::borrow_mut(&mut candidates, inner) = b_id;
-                            *vector::borrow_mut(&mut candidates, inner + 1) = tmp;
-                        };
-                        inner = inner + 1;
-                    };
-                    outer = outer + 1;
-                };
-
-                // Sweep through sorted complementary asks
-                let mut idx = 0;
-                while (idx < n) {
-                    let ask_order_id = *vector::borrow(&candidates, idx);
-
-                    if (!table::contains(&orderbook.active_orders, ask_order_id)) {
-                        idx = idx + 1;
-                        continue;
-                    };
-
-                    let new_order_remaining_now = {
-                        let order = table::borrow(&orderbook.orders, new_order_id);
-                        order.quantity - order.filled_quantity
-                    };
-                    if (new_order_remaining_now == 0) {
-                        break;
-                    };
-
-                    let ask_order_remaining = {
-                        let order = table::borrow(&orderbook.orders, ask_order_id);
-                        order.quantity - order.filled_quantity
-                    };
-                    if (ask_order_remaining == 0) {
-                        idx = idx + 1;
-                        continue;
-                    };
-
-                    let match_qty = if (new_order_remaining_now < ask_order_remaining) {
-                        new_order_remaining_now
-                    } else {
-                        ask_order_remaining
-                    };
-
-                    {
-                        let new_order = table::borrow_mut(&mut orderbook.orders, new_order_id);
-                        new_order.filled_quantity = new_order.filled_quantity + match_qty;
-                    };
-
-                    {
-                        let ask_order = table::borrow_mut(&mut orderbook.orders, ask_order_id);
-                        ask_order.filled_quantity = ask_order.filled_quantity + match_qty;
-                    };
-
-                    {
-                        let ask_order = table::borrow(&orderbook.orders, ask_order_id);
-                        if (ask_order.filled_quantity == ask_order.quantity) {
-                            table::remove(&mut orderbook.active_orders, ask_order_id);
-                        };
-                    };
-
-                    let buyer_addr = {
-                        let order = table::borrow(&orderbook.orders, new_order_id);
-                        order.trader
-                    };
-
-                    let seller_addr = {
-                        let order = table::borrow(&orderbook.orders, ask_order_id);
-                        order.trader
-                    };
-
-                    // Shares move in complementary option
-                    transfer_shares(market, seller_addr, buyer_addr, complementary_option, match_qty, ctx);
-
-                    // Payment at new_order_price in base collateral
-                    let payment_amount = new_order_price * match_qty;
-                    settle_trade_immediate(market, seller_addr, payment_amount, ctx);
-
-                    one::event::emit(CrossAssetMatched {
-                        bid_order_id: new_order_id,
-                        ask_order_id: ask_order_id,
-                        price_a: new_order_price,
-                        price_b: complementary_price,
-                        quantity: match_qty,
-                        market_id: orderbook.market_id,
-                        bid_option: new_order_option,
-                        ask_option: complementary_option,
-                    });
-
-                    let new_remaining = {
-                        let order = table::borrow(&orderbook.orders, new_order_id);
-                        order.quantity - order.filled_quantity
-                    };
-                    if (new_remaining == 0) {
-                        break;
-                    };
-
-                    idx = idx + 1;
+                    current_price = current_price + 1;
                 };
 
             } else {
-                // New order is ASK on new_option; match against BIDs on complementary_option
-                let mut candidates = vector::empty<u64>();
-                let bid_len = vector::length(&orderbook.bid_ids);
-                let mut i = 0;
-                while (i < bid_len) {
-                    let bid_id = *vector::borrow(&orderbook.bid_ids, i);
-                    if (table::contains(&orderbook.active_orders, bid_id)) {
-                        let bid = table::borrow(&orderbook.orders, bid_id);
-                        if (bid.option == complementary_option && bid.price >= complementary_price) {
-                            vector::push_back(&mut candidates, bid_id);
+                // CROSS SELL: Scan complementary bids from 99 down to comp_price_limit
+                let mut current_price = 99;
+                while (current_price >= comp_price_limit && keep_matching) {
+                    if (table::contains(&orderbook.bid_levels, current_price)) {
+                        let level_ids = *table::borrow(&orderbook.bid_levels, current_price);
+                        let len = vector::length(&level_ids);
+                        let mut idx = 0;
+
+                        while (idx < len && keep_matching) {
+                            let bid_order_id = *vector::borrow(&level_ids, idx);
+                            
+                            if (!table::contains(&orderbook.active_orders, bid_order_id)) {
+                                idx = idx + 1; continue;
+                            };
+
+                            let (bid_option, bid_qty, bid_filled) = {
+                                let bid = table::borrow(&orderbook.orders, bid_order_id);
+                                (bid.option, bid.quantity, bid.filled_quantity)
+                            };
+
+                            if (bid_option != comp_option) {
+                                idx = idx + 1; continue;
+                            };
+
+                            let bid_remaining = bid_qty - bid_filled;
+                            if (bid_remaining == 0) {
+                                idx = idx + 1; continue;
+                            };
+
+                            let new_remaining = {
+                                let new_ord = table::borrow(&orderbook.orders, new_order_id);
+                                new_ord.quantity - new_ord.filled_quantity
+                            };
+
+                            if (new_remaining == 0) {
+                                keep_matching = false; break;
+                            };
+
+                            let match_qty = if (new_remaining < bid_remaining) { new_remaining } else { bid_remaining };
+
+                            // Update quantities
+                            {
+                                let new_ord = table::borrow_mut(&mut orderbook.orders, new_order_id);
+                                new_ord.filled_quantity = new_ord.filled_quantity + match_qty;
+                            };
+                            {
+                                let bid_ord = table::borrow_mut(&mut orderbook.orders, bid_order_id);
+                                bid_ord.filled_quantity = bid_ord.filled_quantity + match_qty;
+                                if (bid_ord.filled_quantity == bid_ord.quantity) {
+                                    table::remove(&mut orderbook.active_orders, bid_order_id);
+                                };
+                            };
+
+                            let buyer_addr = { let o = table::borrow(&orderbook.orders, bid_order_id); o.trader };
+                            let seller_addr = { let o = table::borrow(&orderbook.orders, new_order_id); o.trader };
+
+                            transfer_shares(market, seller_addr, buyer_addr, comp_option, match_qty, ctx);
+
+                            let payment_amount = current_price * match_qty;
+                            settle_trade_immediate(market, seller_addr, payment_amount, ctx);
+
+                            one::event::emit(CrossAssetMatched {
+                                bid_order_id: bid_order_id,
+                                ask_order_id: new_order_id,
+                                price_a: current_price,
+                                price_b: get_complementary_price(current_price),
+                                quantity: match_qty,
+                                market_id: orderbook.market_id,
+                                bid_option: comp_option,
+                                ask_option: new_order_option,
+                            });
+
+                            let check_new_rem = {
+                                let new_ord = table::borrow(&orderbook.orders, new_order_id);
+                                new_ord.quantity - new_ord.filled_quantity
+                            };
+                            if (check_new_rem == 0) {
+                                keep_matching = false; break;
+                            };
+
+                            idx = idx + 1;
                         };
                     };
-                    i = i + 1;
-                };
-
-                // Sort by highest price first, then oldest
-                let n = vector::length(&candidates);
-                let mut outer = 0;
-                while (outer < n) {
-                    let mut inner = 0;
-                    while (inner + 1 < n) {
-                        let a_id = *vector::borrow(&candidates, inner);
-                        let b_id = *vector::borrow(&candidates, inner + 1);
-                        if (!is_better_price_time(&orderbook.orders, a_id, b_id, /* ascending = */ false)) {
-                            let tmp = a_id;
-                            *vector::borrow_mut(&mut candidates, inner) = b_id;
-                            *vector::borrow_mut(&mut candidates, inner + 1) = tmp;
-                        };
-                        inner = inner + 1;
-                    };
-                    outer = outer + 1;
-                };
-
-                // Sweep through sorted complementary bids
-                let mut idx = 0;
-                while (idx < n) {
-                    let bid_order_id = *vector::borrow(&candidates, idx);
-
-                    if (!table::contains(&orderbook.active_orders, bid_order_id)) {
-                        idx = idx + 1;
-                        continue;
-                    };
-
-                    let new_order_remaining_now = {
-                        let order = table::borrow(&orderbook.orders, new_order_id);
-                        order.quantity - order.filled_quantity
-                    };
-                    if (new_order_remaining_now == 0) {
-                        break;
-                    };
-
-                    let bid_order_remaining = {
-                        let order = table::borrow(&orderbook.orders, bid_order_id);
-                        order.quantity - order.filled_quantity
-                    };
-                    if (bid_order_remaining == 0) {
-                        idx = idx + 1;
-                        continue;
-                    };
-
-                    let match_qty = if (new_order_remaining_now < bid_order_remaining) {
-                        new_order_remaining_now
-                    } else {
-                        bid_order_remaining
-                    };
-
-                    {
-                        let new_order = table::borrow_mut(&mut orderbook.orders, new_order_id);
-                        new_order.filled_quantity = new_order.filled_quantity + match_qty;
-                    };
-
-                    {
-                        let bid_order = table::borrow_mut(&mut orderbook.orders, bid_order_id);
-                        bid_order.filled_quantity = bid_order.filled_quantity + match_qty;
-                    };
-
-                    {
-                        let bid_order = table::borrow(&orderbook.orders, bid_order_id);
-                        if (bid_order.filled_quantity == bid_order.quantity) {
-                            table::remove(&mut orderbook.active_orders, bid_order_id);
-                        };
-                    };
-
-                    let buyer_addr = {
-                        let order = table::borrow(&orderbook.orders, bid_order_id);
-                        order.trader
-                    };
-
-                    let seller_addr = {
-                        let order = table::borrow(&orderbook.orders, new_order_id);
-                        order.trader
-                    };
-
-                    // Shares move in complementary option
-                    transfer_shares(market, seller_addr, buyer_addr, complementary_option, match_qty, ctx);
-
-                    // Payment at bid price (complementary side)
-                    let payment_amount = {
-                        let bid = table::borrow(&orderbook.orders, bid_order_id);
-                        bid.price * match_qty
-                    };
-                    settle_trade_immediate(market, seller_addr, payment_amount, ctx);
-
-                    one::event::emit(CrossAssetMatched {
-                        bid_order_id: bid_order_id,
-                        ask_order_id: new_order_id,
-                        price_a: complementary_price,
-                        price_b: new_order_price,
-                        quantity: match_qty,
-                        market_id: orderbook.market_id,
-                        bid_option: complementary_option,
-                        ask_option: new_order_option,
-                    });
-
-                    let new_remaining = {
-                        let order = table::borrow(&orderbook.orders, new_order_id);
-                        order.quantity - order.filled_quantity
-                    };
-                    if (new_remaining == 0) {
-                        break;
-                    };
-
-                    idx = idx + 1;
+                    if (current_price == 1) { break }; 
+                    current_price = current_price - 1;
                 };
             };
         };

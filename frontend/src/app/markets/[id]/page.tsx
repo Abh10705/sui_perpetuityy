@@ -8,6 +8,7 @@ import { UserPosition } from '@/components/UserPosition';
 import { MatchingDebug } from '@/components/MatchingDebug';
 import { MARKETS } from '@/lib/constants';
 import { useOrderBook } from '@/hooks/useOrderBook';
+
 // Dynamically import ConnectButton to avoid hydration mismatch
 const ConnectButton = dynamic(
   () => import('@mysten/dapp-kit').then((mod) => ({ default: mod.ConnectButton })),
@@ -22,7 +23,6 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
   const [selectedTeam, setSelectedTeam] = useState<'A' | 'B'>('A');
   
   const { orderbook } = useOrderBook();
-  const recentTrades = orderbook?.recentTrades ?? [];
 
   return (
     <div className="min-h-screen bg-black">
@@ -111,49 +111,6 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
             <h4 className="mb-2 text-sm text-gray-400">Your Position</h4>
             <p className="text-3xl font-bold text-white">0</p>
             <p className="mt-2 text-xs text-gray-400">No active orders</p>
-          </div>
-        </div>
-
-        {/* Recent Trades */}
-        <div className="mt-8">
-          <h2 className="mb-6 text-2xl font-bold">Recent Trades</h2>
-          <div className="rounded-lg border border-gray-700 bg-gray-900 p-6">
-            <div className="space-y-4">
-              {/* Header */}
-              <div className="grid grid-cols-4 gap-4 border-b border-gray-700 pb-4 text-sm font-semibold text-gray-400">
-                <div>Price</div>
-                <div>Quantity</div>
-                <div>Side</div>
-                <div>Time</div>
-              </div>
-
-              {/* Empty state */}
-              <div className="py-8 text-center text-gray-500">
-                {recentTrades.length === 0 ? (
-                  <div className="py-8 text-center text-gray-500">
-                    No trades yet. Be the first to trade!
-                  </div>
-                ) : (
-                  <div className="space-y-1 text-sm">
-                    {recentTrades.map((t) => (
-                      <div
-                        key={t.order_id}
-                        className="grid grid-cols-4 gap-4 py-1 border-b border-gray-800 last:border-b-0"
-                      >
-                        <div>${t.price.toFixed(2)}</div>
-                        <div>{t.filled_quantity}</div>
-                        <div className={t.is_bid ? 'text-green-400' : 'text-red-400'}>
-                          {t.is_bid ? 'BUY' : 'SELL'}
-                        </div>
-                        <div className="text-gray-500">
-                          ...{t.order_id.slice(-6)}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
           </div>
         </div>
 

@@ -103,6 +103,52 @@ export function OrderBook({ optionALabel, optionBLabel }: OrderBookProps) {
           </div>
         </div>
       </div>
+
+      {/* Recent Trades (Using your UI style + Event Data) */}
+      <div className="mt-8">
+        <h2 className="mb-6 text-2xl font-bold">Recent Trades</h2>
+        <div className="rounded-lg border border-gray-700 bg-gray-900 p-6">
+          <div className="space-y-4">
+            {/* Header */}
+            <div className="grid grid-cols-4 gap-4 border-b border-gray-700 pb-4 text-sm font-semibold text-gray-400">
+              <div>Price</div>
+              <div>Quantity</div>
+              <div>Asset</div>
+              <div>Time</div>
+            </div>
+
+            {/* Empty state or Trades */}
+            <div className="py-2 text-center text-gray-500">
+              {!orderbook.recentTrades || orderbook.recentTrades.length === 0 ? (
+                <div className="py-8 text-center text-gray-500">
+                  No trades yet. Be the first to trade!
+                </div>
+              ) : (
+                <div className="space-y-1 text-sm text-left">
+                  {orderbook.recentTrades.map((t) => (
+                    <div
+                      key={t.id}
+                      className="grid grid-cols-4 gap-4 py-2 border-b border-gray-800 last:border-b-0 items-center"
+                    >
+                      <div className="font-mono">${t.price.toFixed(2)}</div>
+                      <div className="font-mono">{t.quantity}</div>
+                      <div className={t.option === 'OptionA' ? 'text-blue-400 font-bold' : 'text-red-400 font-bold'}>
+                        {t.option === 'OptionA' ? optionALabel : optionBLabel}
+                      </div>
+                      <div className="text-gray-500 text-xs">
+                        {new Date(t.timestamp).toLocaleTimeString()}
+                        <div className="mt-1">
+                          ...{t.txDigest.slice(-6)}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
