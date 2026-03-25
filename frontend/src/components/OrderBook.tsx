@@ -110,9 +110,10 @@ export function OrderBook({ optionALabel, optionBLabel }: OrderBookProps) {
         <div className="rounded-lg border border-gray-700 bg-gray-900 p-6">
           <div className="space-y-4">
             {/* Header */}
-            <div className="grid grid-cols-4 gap-4 border-b border-gray-700 pb-4 text-sm font-semibold text-gray-400">
+            <div className="grid grid-cols-5 gap-4 border-b border-gray-700 pb-4 text-sm font-semibold text-gray-400">
               <div>Price</div>
               <div>Quantity</div>
+              <div>Direction</div>
               <div>Asset</div>
               <div>Time</div>
             </div>
@@ -128,11 +129,14 @@ export function OrderBook({ optionALabel, optionBLabel }: OrderBookProps) {
                   {orderbook.recentTrades.map((t) => (
                     <div
                       key={t.id}
-                      className="grid grid-cols-4 gap-4 py-2 border-b border-gray-800 last:border-b-0 items-center"
+                      className="grid grid-cols-5 gap-4 py-2 border-b border-gray-800 last:border-b-0 items-center"
                     >
                       <div className="font-mono">${t.price.toFixed(2)}</div>
                       <div className="font-mono">{t.quantity}</div>
-                      <div className={t.option === 'OptionA' ? 'text-blue-400 font-bold' : 'text-red-400 font-bold'}>
+                      <div className={t.is_bid ? 'text-green-400 font-bold' : 'text-red-400 font-bold'}>
+                        {t.is_bid ? 'BUY' : 'SELL'}
+                      </div>
+                      <div className={t.option === 'OptionA' ? 'text-blue-400 font-bold' : 'text-purple-400 font-bold'}>
                         {t.option === 'OptionA' ? optionALabel : optionBLabel}
                       </div>
                       <div className="text-gray-500 text-xs">

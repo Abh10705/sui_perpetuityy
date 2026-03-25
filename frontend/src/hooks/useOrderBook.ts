@@ -10,7 +10,6 @@ interface TableFields {
   };
 }
 
-// ⭐ NEW: Interface for strictly on-chain events
 export interface TradeEvent {
   id: string;
   txDigest: string;
@@ -19,6 +18,19 @@ export interface TradeEvent {
   option: string;
   timestamp: number;
   type: string;
+  is_bid: boolean; // Added to satisfy Requirement 2
+}
+
+interface EventParsedJson {
+  price?: string;
+  price_a?: string;
+  quantity?: string;
+  option?: { variant: 'OptionA' | 'OptionB' };
+  bid_option?: { variant: 'OptionA' | 'OptionB' };
+  buyer_order_id?: string;
+  seller_order_id?: string;
+  bid_order_id?: string;
+  ask_order_id?: string;
 }
 
 interface DynamicFieldOrder {
@@ -43,13 +55,7 @@ interface DynamicFieldOrder {
     };
   };
 }
-interface EventParsedJson {
-  price?: string;
-  price_a?: string;
-  quantity?: string;
-  option?: { variant: 'OptionA' | 'OptionB' };
-  bid_option?: { variant: 'OptionA' | 'OptionB' };
-}
+
 export function useOrderBook() {
   const [orderbook, setOrderbook] = useState<OrderBookData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -103,7 +109,8 @@ export function useOrderBook() {
             
             if (!orderFields) continue;
 
-            const orderId = String(orderFields.order_id || '');
+            // FIX 1: Ensure orderId is strictly defined for the UI keys
+            const orderId = String(orderFields.order_id || field.name || '');
             const isBid = bid_ids.includes(orderId);
             const isAsk = ask_ids.includes(orderId);
 
@@ -114,7 +121,7 @@ export function useOrderBook() {
             const filled_quantity = parseInt(orderFields.filled_quantity || '0');
 
             const order: Order = {
-              order_id: orderId,
+              order_id: orderId, // Strictly assigned here
               price,
               quantity,
               filled_quantity,
@@ -124,7 +131,6 @@ export function useOrderBook() {
               is_bid: orderFields.is_bid,
             };
 
-            // ⭐ REQUIREMENT 3: Only push if strictly incomplete
             if (isBid && filled_quantity < quantity) {
               bidsData.push(order);
               topBid = Math.max(topBid, price);
@@ -147,7 +153,7 @@ export function useOrderBook() {
       const madridAsks = asksData.filter(ask => ask.option === 'OptionB');
 
       // =========================================================
-      // 2. FETCH REAL ON-CHAIN EVENTS (REQUIREMENT 4)
+      // 2. FETCH REAL ON-CHAIN EVENTS
       // =========================================================
       const eventPage = await suiClient.queryEvents({
         query: {
@@ -157,46 +163,52 @@ export function useOrderBook() {
           }
         },
         order: 'descending',
-        limit: 20, // Fetch the last 20 fragments
+        limit: 100, // FIX 2: Increased limit to prevent truncation
       });
 
       const trueRecentTrades: TradeEvent[] = [];
 
       eventPage.data.forEach((event) => {
         const parsedJson = event.parsedJson as EventParsedJson;
-        const eventType = event.type.split('::').pop(); // 'AutoMatched' or 'CrossAssetMatched'
+        const eventType = event.type.split('::').pop(); 
         
-        // We only want match events
         if (eventType === 'AutoMatched' || eventType === 'TradeSettled') {
+          // FIX 3: Taker logic. The new order (taker) always has a higher ID than the resting order (maker).
+          const buyerId = Number(parsedJson.buyer_order_id || 0);
+          const sellerId = Number(parsedJson.seller_order_id || 0);
+          const is_bid = buyerId > sellerId; // If buyer is the newer order, it's a BUY trade.
+
           trueRecentTrades.push({
             id: `${event.id.txDigest}-${event.id.eventSeq}`,
             txDigest: event.id.txDigest,
-            price: Number(parsedJson.price) / 100,
-            quantity: Number(parsedJson.quantity),
+            price: Number(parsedJson.price || 0) / 100,
+            quantity: Number(parsedJson.quantity || 0),
             option: parsedJson.option?.variant || 'OptionA',
             timestamp: Number(event.timestampMs) || Date.now(),
             type: eventType,
+            is_bid,
           });
         } else if (eventType === 'CrossAssetMatched') {
+          const bidId = Number(parsedJson.bid_order_id || 0);
+          const askId = Number(parsedJson.ask_order_id || 0);
+          const is_bid = bidId > askId;
+
           trueRecentTrades.push({
             id: `${event.id.txDigest}-${event.id.eventSeq}`,
             txDigest: event.id.txDigest,
-            price: Number(parsedJson.price_a) / 100, // Normalized to option A perspective
-            quantity: Number(parsedJson.quantity),
+            price: Number(parsedJson.price_a || 0) / 100, 
+            quantity: Number(parsedJson.quantity || 0),
             option: parsedJson.bid_option?.variant || 'OptionA',
             timestamp: Number(event.timestampMs) || Date.now(),
             type: eventType,
+            is_bid,
           });
         }
       });
 
-      // =========================================================
-      // 3. SET STATE
-      // =========================================================
       setOrderbook({
         topBid: topBid || 0,
         topAsk: topAsk === Number.MAX_SAFE_INTEGER ? 0 : topAsk,
-        // ⭐ REQUIREMENT 3: Use the filtered array lengths for true depth!
         bidDepth: bidsData.length,
         askDepth: asksData.length,
         bids: bidsData,
@@ -205,8 +217,7 @@ export function useOrderBook() {
         barcaAsks,
         madridBids,
         madridAsks,
-        // We are passing the new event-driven trades here now
-        recentTrades: trueRecentTrades,
+        recentTrades: trueRecentTrades, 
       });
 
     } catch (err) {
@@ -219,7 +230,7 @@ export function useOrderBook() {
 
   useEffect(() => {
     fetchOrderBook();
-    const interval = setInterval(fetchOrderBook, 15000); // Poll every 15s
+    const interval = setInterval(fetchOrderBook, 15000);
     return () => clearInterval(interval);
   }, []);
 

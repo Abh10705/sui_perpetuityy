@@ -47,4 +47,5 @@ export interface TradeEvent {
   option: string;
   timestamp: number;
   type: string;
+  is_bid: boolean; // <--- ADD THIS LINE
 }
